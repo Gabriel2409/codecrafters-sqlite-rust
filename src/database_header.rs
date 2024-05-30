@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use binrw::binrw;
 
 #[derive(Debug)]
