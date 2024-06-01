@@ -31,30 +31,41 @@ enum Commands {
     DbInfo,
 }
 
-fn get_nb_of_tables(file: &mut File, initial_pos: u16) -> Result<usize> {
+fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result<usize> {
     let page_header = PageHeader::read(file)?;
-    dbg!(&page_header);
+    dbg!(&page_header.page_type);
+    dbg!(&page_header.number_of_cells);
+
     let nb_of_tables = match page_header.page_type {
         PageType::InteriorTable => {
             let page_cell_pointer_array = PageCellPointerArray::read_args(
                 file,
                 binrw::args! {nb_cells: page_header.number_of_cells},
             )?;
-            dbg!(&page_cell_pointer_array);
+            // dbg!(&page_cell_pointer_array);
 
-            file.seek(SeekFrom::Start(initial_pos as u64))?;
+            file.seek(SeekFrom::Start(initial_pos))?;
+
+            let mut total = 0;
+
             for pointer in page_cell_pointer_array.pointer_cell_array {
                 file.seek(SeekFrom::Current(pointer as i64))?;
                 let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
-                dbg!(b_tree_table_interior_cell);
-                file.seek(SeekFrom::Start(initial_pos as u64))?;
+                // dbg!(&b_tree_table_interior_cell);
+
+                let page_position =
+                    page_size as u64 * (b_tree_table_interior_cell.left_child_pointer) as u64;
+
+                file.seek(SeekFrom::Start(page_position))?;
+                total += get_nb_of_tables(file, page_position, page_size)?;
+
+                file.seek(SeekFrom::Start(initial_pos))?;
             }
 
-            let total = page_header.number_of_cells;
             total
         }
-        PageType::LeafTable => page_header.number_of_cells,
-        _ => anyhow::bail!("Invalid page type to get nb of tables"),
+        PageType::LeafTable => page_header.number_of_cells as usize,
+        _ => 0, // _ => anyhow::bail!("Invalid page type to get nb of tables"),
     };
 
     Ok(nb_of_tables as usize)
@@ -71,7 +82,7 @@ fn main() -> Result<()> {
 
             println!("database page size: {}", db_header.page_size);
 
-            let nb_of_tables = get_nb_of_tables(&mut file, 0)?;
+            let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
             println!("number of tables: {}", nb_of_tables);
 
             // let page_header = PageHeader::read(&mut file)?;

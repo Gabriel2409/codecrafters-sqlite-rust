@@ -1,7 +1,13 @@
-use binrw::binrw;
+use std::{
+    collections::HashMap,
+    io::{Read, Seek},
+};
+
+use binrw::{binrw, BinRead, BinResult, BinWrite};
 
 // https://www.sqlite.org/fileformat.html
 
+/// A page starts with a header
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -19,6 +25,8 @@ pub struct PageHeader {
     // End of header
 }
 
+/// After the header, a page is followed by a pointer arraya
+/// The cell pointer array consists of K 2-byte integer offsets to the cell contents
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -45,7 +53,25 @@ pub enum PageType {
 #[binrw]
 #[brw(big)]
 pub struct BTreeTableInteriorCell {
-    left_child_pointer: u32,
-    /// TODO: modify this
-    integer_key: u8,
+    pub left_child_pointer: u32,
+    /// A varint is between 1 and 9 bytes in length. The varint consists of either zero or more
+    /// bytes which have the high-order bit set followed by a single byte with the high-order bit
+    /// clear, or nine bytes, whichever is shorter.
+    #[br(parse_with = parse_varint)]
+    pub integer_key: u64,
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_varint() -> BinResult<u64> {
+    let mut result = 0u64;
+    let mut shift = 0;
+    for _ in 0..9 {
+        let byte = u8::read_options(reader, endian, ())?;
+        result |= ((byte & 0x7F) as u64) << (7 * shift);
+        if (byte & 0x80) == 0 {
+            break;
+        }
+        shift += 1;
+    }
+    Ok(result)
 }
