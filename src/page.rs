@@ -61,6 +61,19 @@ pub struct BTreeTableInteriorCell {
     pub integer_key: u64,
 }
 
+#[derive(Debug)]
+#[binrw]
+#[brw(big)]
+pub struct BTreeTableLeafCell {
+    #[br(parse_with = parse_varint)]
+    pub nb_bytes_key_payload_including_overflow: u64,
+    #[br(parse_with = parse_varint)]
+    pub integer_key: u64,
+    // REST not parsed
+    #[br(count = nb_bytes_key_payload_including_overflow)]
+    pub rest: Vec<u8>, // wrong
+}
+
 #[binrw::parser(reader, endian)]
 fn parse_varint() -> BinResult<u64> {
     let mut result = 0u64;

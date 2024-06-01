@@ -11,7 +11,7 @@ use std::{
 };
 
 use database_header::DatabaseHeader;
-use page::{PageCellPointerArray, PageHeader, PageType};
+use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType};
 
 use crate::page::BTreeTableInteriorCell;
 
@@ -33,8 +33,8 @@ enum Commands {
 
 fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result<usize> {
     let page_header = PageHeader::read(file)?;
-    dbg!(&page_header.page_type);
-    dbg!(&page_header.number_of_cells);
+    // dbg!(&page_header.page_type);
+    // dbg!(&page_header.number_of_cells);
 
     let nb_of_tables = match page_header.page_type {
         PageType::InteriorTable => {
@@ -44,27 +44,40 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
             )?;
             // dbg!(&page_cell_pointer_array);
 
-            file.seek(SeekFrom::Start(initial_pos))?;
-
             let mut total = 0;
 
             for pointer in page_cell_pointer_array.pointer_cell_array {
+                file.seek(SeekFrom::Start(initial_pos))?;
                 file.seek(SeekFrom::Current(pointer as i64))?;
                 let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
                 // dbg!(&b_tree_table_interior_cell);
 
                 let page_position =
-                    page_size as u64 * (b_tree_table_interior_cell.left_child_pointer) as u64;
+                    page_size as u64 * (b_tree_table_interior_cell.left_child_pointer - 1) as u64;
 
                 file.seek(SeekFrom::Start(page_position))?;
                 total += get_nb_of_tables(file, page_position, page_size)?;
-
-                file.seek(SeekFrom::Start(initial_pos))?;
             }
 
             total
         }
-        PageType::LeafTable => page_header.number_of_cells as usize,
+        PageType::LeafTable => {
+            let page_cell_pointer_array = PageCellPointerArray::read_args(
+                file,
+                binrw::args! {nb_cells: page_header.number_of_cells},
+            )?;
+            // dbg!(page_cell_pointer_array);
+
+            for pointer in page_cell_pointer_array.pointer_cell_array {
+                file.seek(SeekFrom::Start(initial_pos))?;
+                file.seek(SeekFrom::Current(pointer as i64))?;
+                let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
+                // dbg!(&b_tree_table_leaf_cell);
+                dbg!(String::from_utf8_lossy(&b_tree_table_leaf_cell.rest));
+            }
+
+            page_header.number_of_cells as usize
+        }
         _ => 0, // _ => anyhow::bail!("Invalid page type to get nb of tables"),
     };
 
