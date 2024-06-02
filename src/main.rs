@@ -13,7 +13,7 @@ use std::{
 use database_header::DatabaseHeader;
 use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType};
 
-use crate::page::BTreeTableInteriorCell;
+use page::{BTreeTableInteriorCell, Page};
 
 #[derive(Parser)]
 #[command(version, about="Custom sqlite", long_about=None )]
@@ -59,6 +59,11 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 total += get_nb_of_tables(file, page_position, page_size)?;
             }
 
+            let page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
+
+            file.seek(SeekFrom::Start(page_position))?;
+            total += get_nb_of_tables(file, page_position, page_size)?;
+
             total
         }
         PageType::LeafTable => {
@@ -94,6 +99,9 @@ fn main() -> Result<()> {
             let db_header = DatabaseHeader::read(&mut file)?;
 
             println!("database page size: {}", db_header.page_size);
+
+            // let page = Page::read(&mut file)?;
+            // dbg!(page);
 
             let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
             println!("number of tables: {}", nb_of_tables);
