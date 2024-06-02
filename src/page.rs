@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Seek},
-};
-
-use binrw::{binrw, BinRead, BinResult, BinWrite};
+use binrw::{binrw, BinRead, BinResult};
 
 // https://www.sqlite.org/fileformat.html
 
@@ -22,18 +17,6 @@ pub struct PageHeader {
     /// don't advance the cursor
     #[br(if(page_type == PageType::InteriorTable || page_type == PageType::InteriorIndex))]
     pub right_most_pointer: u32,
-    // End of header
-}
-
-/// After the header, a page is followed by a pointer arraya
-/// The cell pointer array consists of K 2-byte integer offsets to the cell contents
-#[derive(Debug)]
-#[binrw]
-#[brw(big)]
-#[br(import { nb_cells: u16 })]
-pub struct PageCellPointerArray {
-    #[br(count = nb_cells)]
-    pub pointer_cell_array: Vec<u16>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,6 +32,17 @@ pub enum PageType {
     LeafTable,
 }
 
+/// After the header, a page is followed by a pointer array
+/// The cell pointer array consists of K 2-byte integer offsets to the cell contents
+#[derive(Debug)]
+#[binrw]
+#[brw(big)]
+#[br(import { nb_cells: usize })]
+pub struct PageCellPointerArray {
+    #[br(count = nb_cells)]
+    pub pointer_cell_array: Vec<u16>,
+}
+
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -61,6 +55,7 @@ pub struct BTreeTableInteriorCell {
     pub integer_key: u64,
 }
 
+/// NOTE: not fully parsed
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -74,6 +69,7 @@ pub struct BTreeTableLeafCell {
     // REST not parsed
 }
 
+/// Helper function to parse varint fields
 #[binrw::parser(reader, endian)]
 fn parse_varint() -> BinResult<u64> {
     let mut result = 0u64;

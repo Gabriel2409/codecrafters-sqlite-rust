@@ -30,6 +30,17 @@ enum Commands {
     DbInfo,
 }
 
+/// Helper function to get the total number of tables.
+/// For the sample.db, we can just read the number of cells in the page header.
+/// However it does not work for more complex databases such as Chinook
+/// (https://github.com/lerocha/chinook-database/releases):
+/// the first page is not a LeafTable but an InteriorTable
+/// In this case, the idea is to traverse the tree until we reach a LeafTable and
+/// add the number of cells.
+/// However, I noticed that it lead to an overestimation in the number of tables.
+/// After investigation, it seems some of the cells correspond to an index
+/// I added an extra filter that looks at the payload of the page and tries to locate
+/// a CREATE TABLE statement. It seems to work but there is probably a better way
 fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result<usize> {
     let page_header = PageHeader::read(file)?;
 
@@ -37,7 +48,7 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
         PageType::InteriorTable => {
             let page_cell_pointer_array = PageCellPointerArray::read_args(
                 file,
-                binrw::args! {nb_cells: page_header.number_of_cells},
+                binrw::args! {nb_cells: page_header.number_of_cells.into()},
             )?;
 
             let mut total = 0;
@@ -64,7 +75,7 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
         PageType::LeafTable => {
             let page_cell_pointer_array = PageCellPointerArray::read_args(
                 file,
-                binrw::args! {nb_cells: page_header.number_of_cells},
+                binrw::args! {nb_cells: page_header.number_of_cells.into()},
             )?;
 
             let mut total = 0;
@@ -83,7 +94,7 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
 
             total
         }
-        _ => 0, // _ => anyhow::bail!("Invalid page type to get nb of tables"),
+        _ => anyhow::bail!("Invalid page type to get nb of tables"),
     };
 
     Ok(nb_of_tables as usize)
