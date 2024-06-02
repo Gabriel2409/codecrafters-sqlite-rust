@@ -39,8 +39,9 @@ pub enum PageType {
 #[brw(big)]
 #[br(import { nb_cells: usize })]
 pub struct PageCellPointerArray {
+    /// Offsets to cell content relative to the beginning of the page
     #[br(count = nb_cells)]
-    pub pointer_cell_array: Vec<u16>,
+    pub offsets: Vec<u16>,
 }
 
 #[derive(Debug)]
@@ -55,7 +56,9 @@ pub struct BTreeTableInteriorCell {
     pub integer_key: u64,
 }
 
-/// NOTE: not fully parsed
+/// NOTE: not fully parsed, still have to figure out how to differentiate
+/// the payload and the 4-byte big-endian integer page number for the
+/// first page of the overflow page list
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -65,6 +68,7 @@ pub struct BTreeTableLeafCell {
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
     #[br(count = nb_bytes_key_payload_including_overflow)]
+    /// initial portion of the payload that does not spill to overflow pages
     pub payload: Vec<u8>,
     // REST not parsed
 }
