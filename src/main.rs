@@ -7,13 +7,12 @@ use clap::{Parser, Subcommand};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
-    os::unix::fs::FileExt,
 };
 
 use database_header::DatabaseHeader;
 use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType};
 
-use page::{BTreeTableInteriorCell, Page};
+use page::BTreeTableInteriorCell;
 
 #[derive(Parser)]
 #[command(version, about="Custom sqlite", long_about=None )]
@@ -33,8 +32,6 @@ enum Commands {
 
 fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result<usize> {
     let page_header = PageHeader::read(file)?;
-    // dbg!(&page_header.page_type);
-    // dbg!(&page_header.number_of_cells);
 
     let nb_of_tables = match page_header.page_type {
         PageType::InteriorTable => {
@@ -42,7 +39,6 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 file,
                 binrw::args! {nb_cells: page_header.number_of_cells},
             )?;
-            // dbg!(&page_cell_pointer_array);
 
             let mut total = 0;
 
@@ -50,7 +46,6 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 file.seek(SeekFrom::Start(initial_pos))?;
                 file.seek(SeekFrom::Current(pointer as i64))?;
                 let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
-                // dbg!(&b_tree_table_interior_cell);
 
                 let page_position =
                     page_size as u64 * (b_tree_table_interior_cell.left_child_pointer - 1) as u64;
@@ -71,17 +66,22 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 file,
                 binrw::args! {nb_cells: page_header.number_of_cells},
             )?;
-            // dbg!(page_cell_pointer_array);
 
+            let mut total = 0;
             for pointer in page_cell_pointer_array.pointer_cell_array {
                 file.seek(SeekFrom::Start(initial_pos))?;
                 file.seek(SeekFrom::Current(pointer as i64))?;
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
-                // dbg!(&b_tree_table_leaf_cell);
-                dbg!(String::from_utf8_lossy(&b_tree_table_leaf_cell.rest));
+
+                // Taking the number_of_cells of the page actually gives
+                let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
+                if begin_payload.contains("CREATE TABLE") {
+                    total += 1;
+                }
+                dbg!(String::from_utf8_lossy(&b_tree_table_leaf_cell.payload));
             }
 
-            page_header.number_of_cells as usize
+            total
         }
         _ => 0, // _ => anyhow::bail!("Invalid page type to get nb of tables"),
     };
@@ -99,9 +99,6 @@ fn main() -> Result<()> {
             let db_header = DatabaseHeader::read(&mut file)?;
 
             println!("database page size: {}", db_header.page_size);
-
-            // let page = Page::read(&mut file)?;
-            // dbg!(page);
 
             let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
             println!("number of tables: {}", nb_of_tables);

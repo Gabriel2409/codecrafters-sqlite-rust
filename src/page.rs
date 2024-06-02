@@ -7,17 +7,6 @@ use binrw::{binrw, BinRead, BinResult, BinWrite};
 
 // https://www.sqlite.org/fileformat.html
 
-/// A sqlite page,
-/// Note that page 0 also includes the database header but it is not represented here
-#[derive(Debug)]
-#[binrw]
-#[brw(big)]
-pub struct Page {
-    header: PageHeader,
-    #[br(count=header.number_of_cells as usize)]
-    pointer_cell_array: Vec<u16>,
-}
-
 /// A page starts with a header
 #[derive(Debug)]
 #[binrw]
@@ -80,9 +69,9 @@ pub struct BTreeTableLeafCell {
     pub nb_bytes_key_payload_including_overflow: u64,
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
-    // REST not parsed
     #[br(count = nb_bytes_key_payload_including_overflow)]
-    pub rest: Vec<u8>, // wrong
+    pub payload: Vec<u8>,
+    // REST not parsed
 }
 
 #[binrw::parser(reader, endian)]
