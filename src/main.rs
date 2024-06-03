@@ -14,6 +14,8 @@ use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType};
 
 use page::BTreeTableInteriorCell;
 
+use crate::page::Record;
+
 #[derive(Parser)]
 #[command(version, about="Custom sqlite", long_about=None )]
 struct Cli {
@@ -28,6 +30,8 @@ struct Cli {
 enum Commands {
     #[command(name = ".dbinfo", about = "Show status information about the database")]
     DbInfo,
+    #[command(name = ".tables", about = "Prints the table names")]
+    Tables,
 }
 
 /// Helper function to get the total number of tables.
@@ -98,6 +102,8 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
 
                 let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
+                let record = Record::read(file)?;
+                dbg!(&begin_payload);
                 if begin_payload.contains("CREATE TABLE") {
                     total += 1;
                 }
@@ -127,7 +133,16 @@ fn main() -> Result<()> {
             let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
             println!("number of tables: {}", nb_of_tables);
         }
-    }
+        Commands::Tables => {
+            let mut file = File::open(&cli.filename)?;
 
+            let db_header = DatabaseHeader::read(&mut file)?;
+
+            println!("database page size: {}", db_header.page_size);
+
+            let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
+            println!("number of tables: {}", nb_of_tables);
+        }
+    }
     Ok(())
 }

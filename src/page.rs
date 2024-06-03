@@ -67,10 +67,24 @@ pub struct BTreeTableLeafCell {
     pub nb_bytes_key_payload_including_overflow: u64,
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
+    pub record: Record,
     #[br(count = nb_bytes_key_payload_including_overflow)]
     /// initial portion of the payload that does not spill to overflow pages
     pub payload: Vec<u8>,
     // REST not parsed
+}
+
+/// TODO: actually parse the record to improve the BTreeTableLeafCell
+/// a single record, see
+/// https://www.sqlite.org/fileformat2.html#record_format
+#[derive(Debug)]
+#[binrw]
+#[brw(big)]
+pub struct Record {
+    #[br(parse_with = parse_varint)]
+    pub nb_bytes_record_header: u64,
+    // then vec of varints. stops when total header size is exhausted
+    // then the values
 }
 
 /// Helper function to parse varint fields
