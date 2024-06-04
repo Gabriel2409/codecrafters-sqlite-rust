@@ -1,3 +1,5 @@
+use std::any;
+
 use binrw::{binrw, BinRead, BinResult};
 
 // https://www.sqlite.org/fileformat.html
@@ -81,10 +83,46 @@ pub struct BTreeTableLeafCell {
 #[binrw]
 #[brw(big)]
 pub struct Record {
-    #[br(parse_with = parse_varint)]
-    pub nb_bytes_record_header: u64,
-    // then vec of varints. stops when total header size is exhausted
-    // then the values
+    #[br(parse_with = parse_record_header)]
+    pub column_type_varints: Vec<u64>,
+}
+
+#[binrw]
+#[brw(big)]
+#[derive(Debug, Clone)]
+enum RecordType {
+    NullRecord,
+    Int8Record,
+    Int16Record,
+    Int24Record,
+    Int32Record,
+    Int48Record,
+    Float64Record,
+    Integer0,
+    Integer1,
+    Blob(u64),
+    String(u64),
+}
+
+impl TryFrom<u64> for RecordType {
+    type Error = &'static str;
+
+    fn try_from(serial_type: u64) -> Result<Self, Self::Error> {
+        Ok(match serial_type {
+            0 => RecordType::NullRecord,
+            1 => RecordType::Int8Record,
+            2 => RecordType::Int16Record,
+            3 => RecordType::Int24Record,
+            4 => RecordType::Int32Record,
+            5 => RecordType::Int48Record,
+            7 => RecordType::Float64Record,
+            8 => RecordType::Integer0,
+            9 => RecordType::Integer1,
+            n if n >= 12 && n % 2 == 0 => RecordType::Blob((n - 12) / 2),
+            n if n >= 13 && n % 2 == 1 => RecordType::String((n - 13) / 2),
+            _ => return Err("Clould not convert varint to record type"),
+        })
+    }
 }
 
 /// Helper function to parse varint fields
@@ -101,4 +139,36 @@ fn parse_varint() -> BinResult<u64> {
         shift += 1;
     }
     Ok(result)
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
+    let mut result = 0u64;
+    let mut shift = 0;
+    let mut bytes_read = 0;
+    for _ in 0..9 {
+        let byte = u8::read_options(reader, endian, ())?;
+        bytes_read += 1;
+        result |= ((byte & 0x7F) as u64) << (7 * shift);
+        if (byte & 0x80) == 0 {
+            break;
+        }
+        shift += 1;
+    }
+    Ok((result, bytes_read))
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_record_header() -> BinResult<Vec<u64>> {
+    let (nb_bytes_record_header, header_bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
+
+    let mut records_type = Vec::new();
+    let mut total_bytes_read = header_bytes_read as u64;
+    while total_bytes_read < nb_bytes_record_header {
+        let (varint, bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
+        records_type.push(varint);
+        total_bytes_read += bytes_read as u64;
+    }
+
+    Ok(records_type)
 }
