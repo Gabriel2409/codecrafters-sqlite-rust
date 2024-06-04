@@ -84,28 +84,30 @@ pub struct BTreeTableLeafCell {
 #[brw(big)]
 pub struct Record {
     #[br(parse_with = parse_record_header)]
-    pub column_type_varints: Vec<u64>,
+    pub column_type_varints: Vec<RecordType>,
 }
 
 #[binrw]
 #[brw(big)]
 #[derive(Debug, Clone)]
-enum RecordType {
+pub enum RecordType {
     NullRecord,
     Int8Record,
     Int16Record,
     Int24Record,
     Int32Record,
     Int48Record,
+    Int64Record,
     Float64Record,
     Integer0,
     Integer1,
+    Reserved,
     Blob(u64),
     String(u64),
 }
 
 impl TryFrom<u64> for RecordType {
-    type Error = &'static str;
+    type Error = binrw::Error;
 
     fn try_from(serial_type: u64) -> Result<Self, Self::Error> {
         Ok(match serial_type {
@@ -115,12 +117,19 @@ impl TryFrom<u64> for RecordType {
             3 => RecordType::Int24Record,
             4 => RecordType::Int32Record,
             5 => RecordType::Int48Record,
+            6 => RecordType::Int64Record,
             7 => RecordType::Float64Record,
             8 => RecordType::Integer0,
             9 => RecordType::Integer1,
+            n if n == 10 || n == 11 => RecordType::Reserved,
             n if n >= 12 && n % 2 == 0 => RecordType::Blob((n - 12) / 2),
             n if n >= 13 && n % 2 == 1 => RecordType::String((n - 13) / 2),
-            _ => return Err("Clould not convert varint to record type"),
+            x => {
+                return Err(binrw::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Could not convert varint {} to record type", x),
+                )))
+            }
         })
     }
 }
@@ -159,14 +168,15 @@ fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
 }
 
 #[binrw::parser(reader, endian)]
-fn parse_record_header() -> BinResult<Vec<u64>> {
+fn parse_record_header() -> BinResult<Vec<RecordType>> {
     let (nb_bytes_record_header, header_bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
 
     let mut records_type = Vec::new();
     let mut total_bytes_read = header_bytes_read as u64;
     while total_bytes_read < nb_bytes_record_header {
         let (varint, bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
-        records_type.push(varint);
+        let record_type = RecordType::try_from(varint)?;
+        records_type.push(record_type);
         total_bytes_read += bytes_read as u64;
     }
 

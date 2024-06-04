@@ -103,7 +103,7 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
 
                 let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
                 let record = Record::read(file)?;
-                dbg!(&begin_payload);
+                dbg!(&begin_payload[..10]);
                 if begin_payload.contains("CREATE TABLE") {
                     total += 1;
                 }
