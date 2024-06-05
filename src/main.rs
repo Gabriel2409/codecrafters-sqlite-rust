@@ -23,8 +23,11 @@ struct Cli {
     #[arg(help = "Name of the db. Fails if file does not exist")]
     filename: String,
 
+    #[arg(help = "SQL command to execute")]
+    sql_command: Option<String>,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -33,6 +36,11 @@ enum Commands {
     DbInfo,
     #[command(name = ".tables", about = "Prints the table names")]
     Tables,
+    #[command(name = ".count", about = "Counts the nb of rows")]
+    CountRows {
+        #[arg(help = "name of the table")]
+        name: String,
+    },
 }
 
 /// Helper function to parse all the information of a table
@@ -112,10 +120,22 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
     Ok(records)
 }
 
+pub fn execute_sql_command(sql_command: &str) {
+    dbg!(sql_command);
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match &cli.command {
+    match &cli.sql_command {
+        Some(sql_command) => {
+            execute_sql_command(&sql_command);
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    match &cli.command.expect("Should have a command at this point") {
         Commands::DbInfo => {
             let mut file = File::open(&cli.filename)?;
 
@@ -136,7 +156,23 @@ fn main() -> Result<()> {
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
             let schema_table = SchemaTable::try_from(records)?;
             let table_names = schema_table.get_table_names();
+
             println!("{}", table_names.join(" "));
+        }
+        Commands::CountRows { name } => {
+            let mut file = File::open(&cli.filename)?;
+
+            let db_header = DatabaseHeader::read(&mut file)?;
+
+            let records = get_table_records(&mut file, 0, db_header.page_size)?;
+            let schema_table = SchemaTable::try_from(records)?;
+            let table_names = schema_table.get_table_names();
+            let root_page = schema_table.get_table_root_page("Invoice").unwrap();
+
+            let page_position = db_header.page_size as u64 * (root_page - 1) as u64;
+            file.seek(SeekFrom::Start(page_position))?;
+            let records = get_table_records(&mut file, page_position, db_header.page_size)?;
+            println!("{}", records.len());
         }
     }
     Ok(())

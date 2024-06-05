@@ -22,6 +22,15 @@ impl SchemaTable {
             .map(|s| s.name.to_string())
             .collect()
     }
+    pub fn get_table_root_page(&self, name: &str) -> Option<u64> {
+        self.records.iter().find_map(|s| {
+            if s.coltype == "table" && s.name == name {
+                Some(s.rootpage)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl TryFrom<Vec<Record>> for SchemaTable {
