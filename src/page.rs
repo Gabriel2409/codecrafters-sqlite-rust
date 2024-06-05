@@ -94,7 +94,7 @@ pub struct Record {
     /// TODO: check nb_bytes_key_payload_including_overflow and compare to page size
     /// to know if there is overflow
     #[br(parse_with = parse_record_payload, args(&column_types))]
-    pub column_content: Vec<ColumnContent>,
+    pub column_contents: Vec<ColumnContent>,
 }
 
 #[binrw]
@@ -211,7 +211,7 @@ fn parse_record_header() -> BinResult<Vec<ColumnType>> {
 /// TODO: handle page overflow
 #[binrw::parser(reader, endian)]
 fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnContent>> {
-    let mut columns_content = Vec::new();
+    let mut column_contents = Vec::new();
     for column_type in column_types {
         let column_content = match column_type {
             ColumnType::Null => ColumnContent::Null,
@@ -277,8 +277,8 @@ fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnCont
                 ColumnContent::String(val.to_string())
             }
         };
-        columns_content.push(column_content);
+        column_contents.push(column_content);
     }
 
-    Ok(columns_content)
+    Ok(column_contents)
 }

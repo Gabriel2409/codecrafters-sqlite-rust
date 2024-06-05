@@ -1,5 +1,6 @@
 mod database_header;
 mod page;
+mod schema_table;
 
 use anyhow::{bail, Result};
 use binrw::BinRead;
@@ -13,6 +14,8 @@ use database_header::DatabaseHeader;
 use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType, Record};
 
 use page::BTreeTableInteriorCell;
+
+use crate::schema_table::SchemaTable;
 
 #[derive(Parser)]
 #[command(version, about="Custom sqlite", long_about=None )]
@@ -128,15 +131,19 @@ fn main() -> Result<()> {
             println!("database page size: {}", db_header.page_size);
 
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
+            let schema_table = SchemaTable::try_from(records)?;
+            let table_names = schema_table.get_table_names();
+            println!("number of tables: {}", table_names.len());
         }
         Commands::Tables => {
             let mut file = File::open(&cli.filename)?;
 
             let db_header = DatabaseHeader::read(&mut file)?;
 
-            println!("database page size: {}", db_header.page_size);
-
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
+            let schema_table = SchemaTable::try_from(records)?;
+            let table_names = schema_table.get_table_names();
+            println!("{}", table_names.join(" "));
         }
     }
     Ok(())
