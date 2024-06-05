@@ -64,8 +64,7 @@ pub struct BTreeTableInteriorCell {
 /// first page of the overflow page list
 /// For now, we will only handle cases without overflow, which means the record
 /// might contain invalid data
-#[derive(Debug)]
-#[binrw]
+#[derive(Debug, BinRead)]
 #[brw(big)]
 pub struct BTreeTableLeafCell {
     #[br(parse_with = parse_varint)]
@@ -85,8 +84,7 @@ pub struct BTreeTableLeafCell {
 /// TODO: actually parse the record to improve the BTreeTableLeafCell
 /// a single record, see
 /// https://www.sqlite.org/fileformat2.html#record_format
-#[derive(Debug)]
-#[binrw]
+#[derive(Debug, BinRead)]
 #[brw(big)]
 pub struct Record {
     /// Header consists in a list of ColumnTypes
@@ -146,16 +144,18 @@ impl TryFrom<u64> for ColumnType {
     }
 }
 
-#[derive(Debug, Clone)]
-#[binrw]
-#[brw(big)]
-#[brw(import { nb_bytes: usize = 0 })]
+#[derive(Debug, Clone, BinRead)]
+#[br(big)]
+#[br(import { nb_bytes: usize })]
 pub enum ColumnContent {
     Null,
     Int(u64),
     Float(f64),
     Blob(#[br(count = nb_bytes)] Vec<u8>),
-    String(#[br(count = nb_bytes)] Vec<u8>),
+    String(
+        #[br(count = nb_bytes, map = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).to_string())]
+        String,
+    ),
 }
 
 /// Helper function to parse varint fields
@@ -272,8 +272,8 @@ fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnCont
             ColumnType::String(x) => {
                 let mut buf = vec![0u8; *x as usize];
                 reader.read_exact(&mut buf)?;
-                // let val = String::from_utf8_lossy(&buf);
-                ColumnContent::String(buf)
+                let val = String::from_utf8_lossy(&buf);
+                ColumnContent::String(val.to_string())
             }
         };
         columns_content.push(column_content);
