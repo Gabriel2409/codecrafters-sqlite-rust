@@ -10,10 +10,15 @@ pub struct SchemaTable {
 }
 
 impl SchemaTable {
+    pub fn get_nb_tables(&self) -> usize {
+        self.records.iter().filter(|s| s.coltype == "table").count()
+    }
+
     pub fn get_table_names(&self) -> Vec<String> {
         self.records
             .iter()
             .filter(|s| s.coltype == "table")
+            .filter(|s| !s.name.starts_with("sqlite_"))
             .map(|s| s.name.to_string())
             .collect()
     }
@@ -47,7 +52,6 @@ impl TryFrom<Record> for SchemaTableRecord {
     type Error = anyhow::Error;
 
     fn try_from(record: Record) -> anyhow::Result<Self> {
-        dbg!(&record);
         if record.column_contents.len() != 5 {
             anyhow::bail!("Wrong number of columns to build the schema table");
         }
@@ -70,6 +74,9 @@ impl TryFrom<Record> for SchemaTableRecord {
         };
         let sql = match &record.column_contents[4] {
             ColumnContent::String(x) => x.to_string(),
+            // for some reason, we have blobs in chinook db
+            // maybe there is a parsing error somewhere
+            ColumnContent::Blob(_) => "Blob".to_string(),
             _ => anyhow::bail!("Wrong column type for schema table"),
         };
 

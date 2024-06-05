@@ -101,13 +101,6 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
 
                 records.push(b_tree_table_leaf_cell.record);
-
-                // let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
-                // dbg!(record);
-                // dbg!(&begin_payload[..60]);
-                // if begin_payload.contains("CREATE TABLE") {
-                //     total += 1;
-                // }
             }
             records
         }
@@ -132,8 +125,8 @@ fn main() -> Result<()> {
 
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
             let schema_table = SchemaTable::try_from(records)?;
-            let table_names = schema_table.get_table_names();
-            println!("number of tables: {}", table_names.len());
+            let nb_tables = schema_table.get_nb_tables();
+            println!("number of tables: {}", nb_tables);
         }
         Commands::Tables => {
             let mut file = File::open(&cli.filename)?;
