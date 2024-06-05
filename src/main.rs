@@ -98,7 +98,8 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
             for offset in page_cell_pointer_array.offsets {
                 file.seek(SeekFrom::Start(initial_pos + offset as u64))?;
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
-                // dbg!(b_tree_table_leaf_cell.record_header);
+
+                dbg!(b_tree_table_leaf_cell.record);
 
                 // let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
                 // dbg!(record);

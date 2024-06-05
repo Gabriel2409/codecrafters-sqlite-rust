@@ -62,7 +62,8 @@ pub struct BTreeTableInteriorCell {
 /// NOTE: not fully parsed, still have to figure out how to differentiate
 /// the payload and the 4-byte big-endian integer page number for the
 /// first page of the overflow page list
-/// For now, we will only handle cases without overflow
+/// For now, we will only handle cases without overflow, which means the record
+/// might contain invalid data
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
@@ -71,8 +72,10 @@ pub struct BTreeTableLeafCell {
     pub nb_bytes_key_payload_including_overflow: u64,
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
-    pub record_header: RecordHeader,
     // #[br(count = nb_bytes_key_payload_including_overflow)]
+    /// The actual reacord consists of a header and a payload.
+    /// For now overflow is not handled
+    pub record: Record,
     // initial portion of the payload that does not spill to overflow pages
     // we suppose there is no overflow for now
     // pub payload: Vec<u8>,
@@ -85,23 +88,29 @@ pub struct BTreeTableLeafCell {
 #[derive(Debug)]
 #[binrw]
 #[brw(big)]
-pub struct RecordHeader {
+pub struct Record {
+    /// Header consists in a list of ColumnTypes
     #[br(parse_with = parse_record_header)]
-    pub column_type_varints: Vec<ObjectType>,
+    pub column_types: Vec<ColumnType>,
+    /// Payload depends on the column types. Note that we don't handle overflow here
+    /// TODO: check nb_bytes_key_payload_including_overflow and compare to page size
+    /// to know if there is overflow
+    #[br(parse_with = parse_record_payload, args(&column_types))]
+    pub column_content: Vec<ColumnContent>,
 }
 
 #[binrw]
 #[brw(big)]
 #[derive(Debug, Clone)]
-pub enum ObjectType {
-    NullRecord,
-    Int8Record,
-    Int16Record,
-    Int24Record,
-    Int32Record,
-    Int48Record,
-    Int64Record,
-    Float64Record,
+pub enum ColumnType {
+    Null,
+    Int8,
+    Int16,
+    Int24,
+    Int32,
+    Int48,
+    Int64,
+    Float64,
     Integer0,
     Integer1,
     Reserved,
@@ -109,24 +118,24 @@ pub enum ObjectType {
     String(u64),
 }
 
-impl TryFrom<u64> for ObjectType {
+impl TryFrom<u64> for ColumnType {
     type Error = binrw::Error;
 
     fn try_from(serial_type: u64) -> Result<Self, Self::Error> {
         Ok(match serial_type {
-            0 => ObjectType::NullRecord,
-            1 => ObjectType::Int8Record,
-            2 => ObjectType::Int16Record,
-            3 => ObjectType::Int24Record,
-            4 => ObjectType::Int32Record,
-            5 => ObjectType::Int48Record,
-            6 => ObjectType::Int64Record,
-            7 => ObjectType::Float64Record,
-            8 => ObjectType::Integer0,
-            9 => ObjectType::Integer1,
-            n if n == 10 || n == 11 => ObjectType::Reserved,
-            n if n >= 12 && n % 2 == 0 => ObjectType::Blob((n - 12) / 2),
-            n if n >= 13 && n % 2 == 1 => ObjectType::String((n - 13) / 2),
+            0 => ColumnType::Null,
+            1 => ColumnType::Int8,
+            2 => ColumnType::Int16,
+            3 => ColumnType::Int24,
+            4 => ColumnType::Int32,
+            5 => ColumnType::Int48,
+            6 => ColumnType::Int64,
+            7 => ColumnType::Float64,
+            8 => ColumnType::Integer0,
+            9 => ColumnType::Integer1,
+            n if n == 10 || n == 11 => ColumnType::Reserved,
+            n if n >= 12 && n % 2 == 0 => ColumnType::Blob((n - 12) / 2),
+            n if n >= 13 && n % 2 == 1 => ColumnType::String((n - 13) / 2),
             x => {
                 return Err(binrw::Error::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -135,6 +144,18 @@ impl TryFrom<u64> for ObjectType {
             }
         })
     }
+}
+
+#[derive(Debug, Clone)]
+#[binrw]
+#[brw(big)]
+#[brw(import { nb_bytes: usize = 0 })]
+pub enum ColumnContent {
+    Null,
+    Int(u64),
+    Float(f64),
+    Blob(#[br(count = nb_bytes)] Vec<u8>),
+    String(#[br(count = nb_bytes)] Vec<u8>),
 }
 
 /// Helper function to parse varint fields
@@ -171,7 +192,7 @@ fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
 }
 
 #[binrw::parser(reader, endian)]
-fn parse_record_header() -> BinResult<Vec<ObjectType>> {
+fn parse_record_header() -> BinResult<Vec<ColumnType>> {
     let (size_header, header_bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
 
     let mut records_type = Vec::new();
@@ -179,41 +200,45 @@ fn parse_record_header() -> BinResult<Vec<ObjectType>> {
     while total_bytes_read < size_header {
         let (varint, bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
         // dbg!(varint, bytes_read);
-        let record_type = ObjectType::try_from(varint)?;
+        let record_type = ColumnType::try_from(varint)?;
         records_type.push(record_type);
         total_bytes_read += bytes_read as u64;
     }
 
-    for record_type in &records_type {
-        match record_type {
-            ObjectType::NullRecord => {
-                dbg!("NULL");
-            }
-            ObjectType::Int8Record => {
+    Ok(records_type)
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnContent>> {
+    let mut columns_content = Vec::new();
+    for column_type in column_types {
+        let column_content = match column_type {
+            ColumnType::Null => ColumnContent::Null,
+            ColumnType::Int8 => {
                 let mut buf = [0u8; 1];
                 reader.read_exact(&mut buf)?;
                 let val = u8::from_be_bytes(buf);
-                dbg!(val);
+                ColumnContent::Int(val as u64)
             }
-            ObjectType::Int16Record => {
+            ColumnType::Int16 => {
                 let mut buf = [0u8; 2];
                 reader.read_exact(&mut buf)?;
                 let val = u16::from_be_bytes(buf);
-                dbg!(val);
+                ColumnContent::Int(val as u64)
             }
-            ObjectType::Int24Record => {
+            ColumnType::Int24 => {
                 let mut buf = [0u8; 3];
                 reader.read_exact(&mut buf)?;
                 let val: u32 = (buf[0] as u32) << 16 + (buf[1] as u32) << 8 + buf[2] as u32;
-                dbg!(val);
+                ColumnContent::Int(val as u64)
             }
-            ObjectType::Int32Record => {
+            ColumnType::Int32 => {
                 let mut buf = [0u8; 4];
                 reader.read_exact(&mut buf)?;
                 let val = u32::from_be_bytes(buf);
-                dbg!(val);
+                ColumnContent::Int(val as u64)
             }
-            ObjectType::Int48Record => {
+            ColumnType::Int48 => {
                 let mut buf = [0u8; 6];
                 reader.read_exact(&mut buf)?;
                 let val: u64 = (buf[0] as u64)
@@ -222,44 +247,37 @@ fn parse_record_header() -> BinResult<Vec<ObjectType>> {
                     << 24 + (buf[3] as u64)
                     << 16 + (buf[4] as u64)
                     << 8 + (buf[5] as u64);
-                dbg!(val);
+                ColumnContent::Int(val)
             }
-            ObjectType::Int64Record => {
+            ColumnType::Int64 => {
                 let mut buf = [0u8; 8];
                 reader.read_exact(&mut buf)?;
                 let val = u64::from_be_bytes(buf);
-                dbg!(val);
+                ColumnContent::Int(val)
             }
-            ObjectType::Float64Record => {
+            ColumnType::Float64 => {
                 let mut buf = [0u8; 8];
                 reader.read_exact(&mut buf)?;
                 let val = f64::from_be_bytes(buf);
-                dbg!(val);
+                ColumnContent::Float(val)
             }
-            ObjectType::Integer0 => {
-                let val = 0;
-                dbg!(val);
-            }
-            ObjectType::Integer1 => {
-                let val = 1;
-                dbg!(val);
-            }
-            ObjectType::Reserved => todo!(),
-            ObjectType::Blob(x) => {
+            ColumnType::Integer0 => ColumnContent::Int(0),
+            ColumnType::Integer1 => ColumnContent::Int(1),
+            ColumnType::Reserved => todo!(),
+            ColumnType::Blob(x) => {
                 let mut buf = vec![0u8; *x as usize];
                 reader.read_exact(&mut buf)?;
-                dbg!("BLOB");
+                ColumnContent::Blob(buf)
             }
-            ObjectType::String(x) => {
+            ColumnType::String(x) => {
                 let mut buf = vec![0u8; *x as usize];
                 reader.read_exact(&mut buf)?;
-                let val = String::from_utf8_lossy(&buf);
-                dbg!(val);
+                // let val = String::from_utf8_lossy(&buf);
+                ColumnContent::String(buf)
             }
-        }
+        };
+        columns_content.push(column_content);
     }
 
-    // let columns =
-
-    Ok(records_type)
+    Ok(columns_content)
 }
