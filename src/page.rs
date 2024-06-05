@@ -208,6 +208,7 @@ fn parse_record_header() -> BinResult<Vec<ColumnType>> {
     Ok(records_type)
 }
 
+/// TODO: handle page overflow
 #[binrw::parser(reader, endian)]
 fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnContent>> {
     let mut columns_content = Vec::new();

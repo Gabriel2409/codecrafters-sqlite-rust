@@ -10,7 +10,7 @@ use std::{
 };
 
 use database_header::DatabaseHeader;
-use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType};
+use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType, Record};
 
 use page::BTreeTableInteriorCell;
 
@@ -32,33 +32,30 @@ enum Commands {
     Tables,
 }
 
-/// Helper function to get the total number of tables.
+/// Helper function to parse all the information of a table
 /// For the sample.db, we can just read the number of cells in the page header.
 /// However it does not work for more complex databases such as Chinook
 /// (https://github.com/lerocha/chinook-database/releases):
 /// the first page is not a LeafTable but an InteriorTable
 /// In this case, the idea is to traverse the tree until we reach a LeafTable and
-/// add the number of cells.
-/// However, I noticed that it lead to an overestimation in the number of tables.
-/// After investigation, it seems some of the cells correspond to an index
-/// I added an extra filter that looks at the payload of the page and tries to locate
-/// a CREATE TABLE statement. It seems to work but there is probably a better way
-fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result<usize> {
-    // When called for the first time, we are on the first page and already parsed the
-    // database header: initial_pos is still 0 but file.stream_position() is 100.
+/// then parse the leaf cells
+fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Result<Vec<Record>> {
+    // initial_pos can be different from current stream position. For ex, on the first page,
+    // this should be called after parsing the db header:
+    // initial_pos is still 0 but file.stream_position() is 100.
     // For other pages, the page actually start with the page header, so the initial_pos
     // corresponds to file.stream_position()
 
     let page_header = PageHeader::read(file)?;
 
-    let nb_of_tables = match page_header.page_type {
+    let records = match page_header.page_type {
         PageType::InteriorTable => {
             let page_cell_pointer_array = PageCellPointerArray::read_args(
                 file,
                 binrw::args! {nb_cells: page_header.number_of_cells.into()},
             )?;
 
-            let mut total = 0;
+            let mut records = Vec::new();
 
             // Here we read the pages corresponding to the pointer array.
             // sqlite pages start at 1, which is why we have the -1
@@ -72,15 +69,16 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
 
                 file.seek(SeekFrom::Start(page_position))?;
                 // traverse the b tree.
-                total += get_nb_of_tables(file, page_position, page_size)?;
+                let child_records = get_table_records(file, page_position, page_size)?;
+                records.extend(child_records);
             }
 
             // Important: We need to also add the page referenced by the right_most_pointer
             let page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
             file.seek(SeekFrom::Start(page_position))?;
-            total += get_nb_of_tables(file, page_position, page_size)?;
-
-            total
+            let child_records = get_table_records(file, page_position, page_size)?;
+            records.extend(child_records);
+            records
         }
         PageType::LeafTable => {
             // For leaf table, I was tempted to simply read the number_of_cells but
@@ -94,12 +92,12 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 binrw::args! {nb_cells: page_header.number_of_cells.into()},
             )?;
 
-            let mut total = 0;
+            let mut records = Vec::new();
             for offset in page_cell_pointer_array.offsets {
                 file.seek(SeekFrom::Start(initial_pos + offset as u64))?;
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
 
-                dbg!(b_tree_table_leaf_cell.record);
+                records.push(b_tree_table_leaf_cell.record);
 
                 // let begin_payload = String::from_utf8_lossy(&b_tree_table_leaf_cell.payload);
                 // dbg!(record);
@@ -108,15 +106,14 @@ fn get_nb_of_tables(file: &mut File, initial_pos: u64, page_size: u16) -> Result
                 //     total += 1;
                 // }
             }
-
-            total
+            records
         }
         _ => anyhow::bail!(
             "When traversing the b tree, only interior and leaf TABLE pages should be encountered"
         ),
     };
 
-    Ok(nb_of_tables as usize)
+    Ok(records)
 }
 
 fn main() -> Result<()> {
@@ -130,8 +127,7 @@ fn main() -> Result<()> {
 
             println!("database page size: {}", db_header.page_size);
 
-            let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
-            println!("number of tables: {}", nb_of_tables);
+            let records = get_table_records(&mut file, 0, db_header.page_size)?;
         }
         Commands::Tables => {
             let mut file = File::open(&cli.filename)?;
@@ -140,8 +136,7 @@ fn main() -> Result<()> {
 
             println!("database page size: {}", db_header.page_size);
 
-            let nb_of_tables = get_nb_of_tables(&mut file, 0, db_header.page_size)?;
-            println!("number of tables: {}", nb_of_tables);
+            let records = get_table_records(&mut file, 0, db_header.page_size)?;
         }
     }
     Ok(())
