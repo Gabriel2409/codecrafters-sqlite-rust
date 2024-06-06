@@ -67,7 +67,6 @@ pub struct BTreeTableInteriorCell {
 #[binread]
 #[derive(Debug)]
 #[brw(big)]
-#[br(import { cell_position: u64 })]
 pub struct BTreeTableLeafCell {
     #[br(parse_with = parse_varint)]
     pub nb_bytes_key_payload_including_overflow: u64,
@@ -76,7 +75,6 @@ pub struct BTreeTableLeafCell {
 
     #[br(args {
         nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
-        cell_position: cell_position
     })]
     pub record: Record,
     // initial portion of the payload that does not spill to overflow pages
@@ -87,13 +85,16 @@ pub struct BTreeTableLeafCell {
 
 #[derive(Debug, BinRead)]
 #[brw(big)]
-#[br(import { nb_bytes_key_payload_including_overflow: usize, cell_position: u64 })]
+#[br(import { nb_bytes_key_payload_including_overflow: usize })]
 pub struct Record {
-    /// Header consists in a list of ColumnTypes
-    #[br(parse_with = parse_record_header)]
+    /// Header consists in a list of ColumnTypes after a varint indicating the size
+    #[br(parse_with = parse_varint_with_bytes)]
+    pub size_header_varint: (u64, usize),
+
+    #[br(parse_with = parse_record_header, args(size_header_varint))]
     pub column_types: Vec<ColumnType>,
     /// Payload depends on the column types. Note that we don't handle overflow here
-    #[br(parse_with = parse_record_payload, args(&column_types, nb_bytes_key_payload_including_overflow, cell_position))]
+    #[br(parse_with = parse_record_payload, args(&column_types, nb_bytes_key_payload_including_overflow, size_header_varint.0))]
     pub column_contents: Vec<ColumnContent>,
 }
 
@@ -192,8 +193,8 @@ fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
 }
 
 #[binrw::parser(reader, endian)]
-fn parse_record_header() -> BinResult<Vec<ColumnType>> {
-    let (size_header, header_bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
+fn parse_record_header(size_header_varint: (u64, usize)) -> BinResult<Vec<ColumnType>> {
+    let (size_header, header_bytes_read) = size_header_varint;
 
     let mut records_type = Vec::new();
     let mut total_bytes_read = header_bytes_read as u64;
@@ -213,8 +214,20 @@ fn parse_record_header() -> BinResult<Vec<ColumnType>> {
 fn parse_record_payload(
     column_types: &[ColumnType],
     nb_bytes_key_payload_including_overflow: usize,
-    cell_position: u64,
+    header_size: u64,
 ) -> BinResult<Vec<ColumnContent>> {
+    let page_size = 4096;
+    let reserved_space = 0;
+
+    let P = nb_bytes_key_payload_including_overflow;
+    let U = page_size - reserved_space;
+    let X = U - 35;
+
+    let M = ((U - 12) * 32) / 255 - 23;
+    let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
+
+    let mut nb_bytes_parsed = header_size;
+
     let mut column_contents = Vec::new();
     for column_type in column_types {
         let column_content = match column_type {
@@ -223,24 +236,28 @@ fn parse_record_payload(
                 let mut buf = [0u8; 1];
                 reader.read_exact(&mut buf)?;
                 let val = u8::from_be_bytes(buf);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val as u64)
             }
             ColumnType::Int16 => {
                 let mut buf = [0u8; 2];
                 reader.read_exact(&mut buf)?;
                 let val = u16::from_be_bytes(buf);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val as u64)
             }
             ColumnType::Int24 => {
                 let mut buf = [0u8; 3];
                 reader.read_exact(&mut buf)?;
                 let val: u32 = (buf[0] as u32) << 16 + (buf[1] as u32) << 8 + buf[2] as u32;
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val as u64)
             }
             ColumnType::Int32 => {
                 let mut buf = [0u8; 4];
                 reader.read_exact(&mut buf)?;
                 let val = u32::from_be_bytes(buf);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val as u64)
             }
             ColumnType::Int48 => {
@@ -252,18 +269,21 @@ fn parse_record_payload(
                     << 24 + (buf[3] as u64)
                     << 16 + (buf[4] as u64)
                     << 8 + (buf[5] as u64);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val)
             }
             ColumnType::Int64 => {
                 let mut buf = [0u8; 8];
                 reader.read_exact(&mut buf)?;
                 let val = u64::from_be_bytes(buf);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val)
             }
             ColumnType::Float64 => {
                 let mut buf = [0u8; 8];
                 reader.read_exact(&mut buf)?;
                 let val = f64::from_be_bytes(buf);
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Float(val)
             }
             ColumnType::Integer0 => ColumnContent::Int(0),
@@ -272,11 +292,11 @@ fn parse_record_payload(
             ColumnType::Blob(x) => {
                 let mut buf = vec![0u8; *x as usize];
                 reader.read_exact(&mut buf)?;
+                nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Blob(buf)
             }
             ColumnType::String(x) => {
-                dbg!(cell_position, reader.stream_position()?);
-                let page_size = 4096;
+                dbg!(K, P, U, M, nb_bytes_parsed);
 
                 // let position = reader.stream_position()? % page_size;
                 // let mut buf_size = *x;
@@ -285,7 +305,6 @@ fn parse_record_payload(
                 // }
                 //
                 // let mut buf = vec![0u8; buf_size as usize];
-                let reserved_space = 0;
 
                 // let P = nb_bytes_key_payload_including_overflow;
                 // let U = page_size - reserved_space;
@@ -294,12 +313,28 @@ fn parse_record_payload(
                 // let M = ((U - 12) * 32) / 255 - 23;
                 // let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
 
-                let mut buf = vec![0u8; *x as usize];
+                let mut bufsize = *x as usize;
+                let remain = K - nb_bytes_parsed as usize;
+                let mut is_overflowing = false;
+                if bufsize > remain {
+                    bufsize = remain;
+                    is_overflowing = true;
+                }
+
+                let mut buf = vec![0u8; bufsize];
 
                 reader.read_exact(&mut buf)?;
-                dbg!(x, buf.len());
                 let val = String::from_utf8_lossy(&buf);
-                dbg!(&val);
+                dbg!(&val, is_overflowing);
+                nb_bytes_parsed += buf.len() as u64;
+
+                if is_overflowing {
+                    let mut buf = [0u8; 4];
+                    reader.read_exact(&mut buf)?;
+                    let page_no = u32::from_be_bytes(buf);
+                    dbg!(page_no);
+                }
+
                 ColumnContent::String(val.to_string())
             }
         };
