@@ -105,8 +105,10 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
 
             let mut records = Vec::new();
             for offset in page_cell_pointer_array.offsets {
-                file.seek(SeekFrom::Start(initial_pos + offset as u64))?;
-                let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
+                let cell_position = initial_pos + offset as u64;
+                file.seek(SeekFrom::Start(cell_position))?;
+                let b_tree_table_leaf_cell =
+                    BTreeTableLeafCell::read_args(file, binrw::args! {cell_position})?;
 
                 records.push(b_tree_table_leaf_cell.record);
             }
@@ -154,6 +156,7 @@ fn main() -> Result<()> {
             let db_header = DatabaseHeader::read(&mut file)?;
 
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
+            // dbg!(&records);
             let schema_table = SchemaTable::try_from(records)?;
             let table_names = schema_table.get_table_names();
 

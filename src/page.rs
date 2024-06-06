@@ -1,6 +1,6 @@
 use std::any;
 
-use binrw::{binrw, BinRead, BinResult};
+use binrw::{binread, binrw, BinRead, BinResult};
 
 // https://www.sqlite.org/fileformat.html
 
@@ -64,16 +64,20 @@ pub struct BTreeTableInteriorCell {
 /// first page of the overflow page list
 /// For now, we will only handle cases without overflow, which means the record
 /// might contain invalid data
-#[derive(Debug, BinRead)]
+#[binread]
+#[derive(Debug)]
 #[brw(big)]
+#[br(import { cell_position: u64 })]
 pub struct BTreeTableLeafCell {
     #[br(parse_with = parse_varint)]
     pub nb_bytes_key_payload_including_overflow: u64,
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
-    // #[br(count = nb_bytes_key_payload_including_overflow)]
-    /// The actual reacord consists of a header and a payload.
-    /// For now overflow is not handled
+
+    #[br(args {
+        nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
+        cell_position: cell_position
+    })]
     pub record: Record,
     // initial portion of the payload that does not spill to overflow pages
     // we suppose there is no overflow for now
@@ -81,19 +85,15 @@ pub struct BTreeTableLeafCell {
     // REST not parsed - we suppose there is no overflow
 }
 
-/// TODO: actually parse the record to improve the BTreeTableLeafCell
-/// a single record, see
-/// https://www.sqlite.org/fileformat2.html#record_format
 #[derive(Debug, BinRead)]
 #[brw(big)]
+#[br(import { nb_bytes_key_payload_including_overflow: usize, cell_position: u64 })]
 pub struct Record {
     /// Header consists in a list of ColumnTypes
     #[br(parse_with = parse_record_header)]
     pub column_types: Vec<ColumnType>,
     /// Payload depends on the column types. Note that we don't handle overflow here
-    /// TODO: check nb_bytes_key_payload_including_overflow and compare to page size
-    /// to know if there is overflow
-    #[br(parse_with = parse_record_payload, args(&column_types))]
+    #[br(parse_with = parse_record_payload, args(&column_types, nb_bytes_key_payload_including_overflow, cell_position))]
     pub column_contents: Vec<ColumnContent>,
 }
 
@@ -210,7 +210,11 @@ fn parse_record_header() -> BinResult<Vec<ColumnType>> {
 
 /// TODO: handle page overflow
 #[binrw::parser(reader, endian)]
-fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnContent>> {
+fn parse_record_payload(
+    column_types: &[ColumnType],
+    nb_bytes_key_payload_including_overflow: usize,
+    cell_position: u64,
+) -> BinResult<Vec<ColumnContent>> {
     let mut column_contents = Vec::new();
     for column_type in column_types {
         let column_content = match column_type {
@@ -271,9 +275,31 @@ fn parse_record_payload(column_types: &[ColumnType]) -> BinResult<Vec<ColumnCont
                 ColumnContent::Blob(buf)
             }
             ColumnType::String(x) => {
+                dbg!(cell_position, reader.stream_position()?);
+                let page_size = 4096;
+
+                // let position = reader.stream_position()? % page_size;
+                // let mut buf_size = *x;
+                // if position + *x > available_space {
+                //     buf_size = available_space - position;
+                // }
+                //
+                // let mut buf = vec![0u8; buf_size as usize];
+                let reserved_space = 0;
+
+                // let P = nb_bytes_key_payload_including_overflow;
+                // let U = page_size - reserved_space;
+                // let X = U - 35;
+                //
+                // let M = ((U - 12) * 32) / 255 - 23;
+                // let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
+
                 let mut buf = vec![0u8; *x as usize];
+
                 reader.read_exact(&mut buf)?;
+                dbg!(x, buf.len());
                 let val = String::from_utf8_lossy(&buf);
+                dbg!(&val);
                 ColumnContent::String(val.to_string())
             }
         };
