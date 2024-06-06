@@ -219,6 +219,7 @@ fn parse_record_payload(
     let page_size = 4096;
     let reserved_space = 0;
 
+    /// Could be used for overflow
     let P = nb_bytes_key_payload_including_overflow;
     let U = page_size - reserved_space;
     let X = U - 35;
@@ -296,44 +297,19 @@ fn parse_record_payload(
                 ColumnContent::Blob(buf)
             }
             ColumnType::String(x) => {
-                dbg!(K, P, U, M, nb_bytes_parsed);
-
-                // let position = reader.stream_position()? % page_size;
-                // let mut buf_size = *x;
-                // if position + *x > available_space {
-                //     buf_size = available_space - position;
-                // }
-                //
-                // let mut buf = vec![0u8; buf_size as usize];
-
-                // let P = nb_bytes_key_payload_including_overflow;
-                // let U = page_size - reserved_space;
-                // let X = U - 35;
-                //
-                // let M = ((U - 12) * 32) / 255 - 23;
-                // let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
-
+                // For some reason, sometimes the string size is completely overestimated
+                // There must be a problem with my varint
                 let mut bufsize = *x as usize;
-                let remain = K - nb_bytes_parsed as usize;
-                let mut is_overflowing = false;
+                let remain = P - nb_bytes_parsed as usize;
                 if bufsize > remain {
                     bufsize = remain;
-                    is_overflowing = true;
                 }
-
                 let mut buf = vec![0u8; bufsize];
 
                 reader.read_exact(&mut buf)?;
                 let val = String::from_utf8_lossy(&buf);
-                dbg!(&val, is_overflowing);
                 nb_bytes_parsed += buf.len() as u64;
-
-                if is_overflowing {
-                    let mut buf = [0u8; 4];
-                    reader.read_exact(&mut buf)?;
-                    let page_no = u32::from_be_bytes(buf);
-                    dbg!(page_no);
-                }
+                // TODO: handle overflow
 
                 ColumnContent::String(val.to_string())
             }
