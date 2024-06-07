@@ -1,9 +1,7 @@
 use nom::{
+    branch::alt,
     bytes::complete::{tag, tag_no_case, take_until, take_while1},
-    character::complete::{
-        self, alpha1, alphanumeric1, anychar, char, line_ending, multispace0, multispace1, none_of,
-        not_line_ending, one_of, space0, space1,
-    },
+    character::complete::{alphanumeric1, char, multispace0, multispace1, space0},
     multi::{separated_list0, separated_list1},
     sequence::{delimited, preceded, separated_pair},
     IResult,
@@ -25,13 +23,26 @@ pub struct CreateTableQuery {
 }
 
 fn parse_identifier(input: &str) -> IResult<&str, &str> {
-    delimited(multispace0, alphanumeric1, multispace0)(input)
+    delimited(
+        multispace0,
+        alt((
+            take_while1(|c: char| c == '_' || c.is_alphanumeric()),
+            delimited(char('"'), take_until("\""), char('"')),
+        )),
+        multispace0,
+    )(input)
+}
+
+fn parse_double_quote_value(input: &str) -> IResult<&str, &str> {
+    delimited(char('\"'), take_until("'"), char('\''))(input)
 }
 
 fn parse_identifier_or_star(input: &str) -> IResult<&str, &str> {
     delimited(
         multispace0,
-        take_while1(|c: char| c == '(' || c == ')' || c == '*' || c == '\'' || c.is_alphanumeric()),
+        take_while1(|c: char| {
+            c == '(' || c == ')' || c == '*' || c == '\'' || c == '_' || c.is_alphanumeric()
+        }),
         multispace0,
     )(input)
 }
@@ -90,7 +101,11 @@ pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
 }
 
 fn parse_column_def(input: &str) -> IResult<&str, Vec<&str>> {
-    separated_list1(multispace1, alphanumeric1)(input)
+    separated_list1(
+        multispace1,
+        // alphanumeric1
+        take_while1(|c: char| c == '_' || c.is_alphanumeric()),
+    )(input)
 }
 
 fn parse_column_defs(input: &str) -> IResult<&str, Vec<Vec<&str>>> {

@@ -3,15 +3,13 @@ mod page;
 mod schema_table;
 mod sql_parser;
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use binrw::BinRead;
 use clap::{Parser, Subcommand};
-use itertools::any;
-use nom::Finish;
 use sql_parser::parse_select_command;
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
 };
 
 use database_header::DatabaseHeader;

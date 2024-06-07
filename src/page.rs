@@ -1,5 +1,3 @@
-use std::any;
-
 use binrw::{binread, binrw, BinRead, BinResult};
 
 // https://www.sqlite.org/fileformat.html

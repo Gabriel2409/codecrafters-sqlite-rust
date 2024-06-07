@@ -1,5 +1,3 @@
-use anyhow::Context;
-
 use crate::page::{ColumnContent, Record};
 
 /// https://sqlite.org/schematab.html
