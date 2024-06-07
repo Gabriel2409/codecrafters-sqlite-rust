@@ -177,7 +177,7 @@ fn main() -> Result<()> {
                                 kept_cols.push(i);
                             }
                             if let Some(where_clause) = &select_query.where_clause {
-                                if column.to_lowercase() == where_clause.0.to_lowercase() {
+                                if col.to_lowercase() == where_clause.0.to_lowercase() {
                                     where_val = where_clause.1.clone();
                                     where_col = Some(i);
                                 }
@@ -188,7 +188,8 @@ fn main() -> Result<()> {
                     for record in records {
                         let mut cur_recs = Vec::new();
                         if let Some(where_col) = where_col {
-                            if where_val != record.column_contents[where_col].repr() {
+                            let column_repr = record.column_contents[where_col].repr();
+                            if where_val != column_repr {
                                 continue;
                             }
                         }
