@@ -1,5 +1,8 @@
 use nom::{
-    bytes::complete::{tag, tag_no_case, take_until, take_while1},
+    bytes::{
+        complete::{tag, tag_no_case, take_until, take_while1},
+        streaming::tag_no_case,
+    },
     character::complete::{
         self, alpha1, alphanumeric1, anychar, char, line_ending, multispace0, multispace1, none_of,
         not_line_ending, one_of, space0, space1,
@@ -49,7 +52,7 @@ fn parse_value(input: &str) -> IResult<&str, &str> {
 
 fn parse_where_clause(input: &str) -> IResult<&str, (&str, &str)> {
     preceded(
-        tag("WHERE"),
+        tag_no_case("WHERE"),
         delimited(
             multispace1,
             separated_pair(
