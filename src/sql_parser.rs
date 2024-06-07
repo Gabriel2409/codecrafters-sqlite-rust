@@ -5,7 +5,7 @@ use nom::{
         not_line_ending, one_of, space0, space1,
     },
     multi::{separated_list0, separated_list1},
-    sequence::delimited,
+    sequence::{delimited, preceded, separated_pair},
     IResult,
 };
 
@@ -13,6 +13,8 @@ use nom::{
 pub struct SelectQuery {
     pub columns: Vec<String>,
     pub tablename: String,
+    // compares column name to value
+    pub where_clause: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,7 +31,7 @@ fn parse_identifier(input: &str) -> IResult<&str, &str> {
 fn parse_identifier_or_star(input: &str) -> IResult<&str, &str> {
     delimited(
         multispace0,
-        take_while1(|c: char| c == '(' || c == ')' || c == '*' || c.is_alphanumeric()),
+        take_while1(|c: char| c == '(' || c == ')' || c == '*' || c == '\'' || c.is_alphanumeric()),
         multispace0,
     )(input)
 }
@@ -38,6 +40,25 @@ fn parse_columns(input: &str) -> IResult<&str, Vec<&str>> {
     separated_list0(
         delimited(multispace0, char(','), multispace0),
         parse_identifier_or_star,
+    )(input)
+}
+
+fn parse_value(input: &str) -> IResult<&str, &str> {
+    delimited(char('\''), take_until("'"), char('\''))(input)
+}
+
+fn parse_where_clause(input: &str) -> IResult<&str, (&str, &str)> {
+    preceded(
+        tag("WHERE"),
+        delimited(
+            multispace1,
+            separated_pair(
+                parse_identifier,
+                delimited(multispace0, char('='), multispace0),
+                parse_value,
+            ),
+            multispace0,
+        ),
     )(input)
 }
 
@@ -53,9 +74,18 @@ pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
 
     let (input, tablename) = parse_identifier(input)?;
     let tablename = tablename.to_string();
-    // let (input, _) = tag(";")(input)?;
 
-    let select_query = SelectQuery { columns, tablename };
+    let (_, where_clause) = parse_where_clause(input).ok().unzip();
+
+    let where_clause = where_clause.map(|(a, b)| (a.to_owned(), b.to_owned()));
+    // let (input, _) = tag(";")(input)?;
+    dbg!(&where_clause);
+
+    let select_query = SelectQuery {
+        columns,
+        tablename,
+        where_clause,
+    };
 
     Ok((input, select_query))
 }

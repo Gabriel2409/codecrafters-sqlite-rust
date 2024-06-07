@@ -168,16 +168,31 @@ fn main() -> Result<()> {
                     println!("{}", records.len());
                 } else {
                     let mut kept_cols = Vec::new();
-                    for column in select_query.columns {
+
+                    let mut where_col = None;
+                    let mut where_val = String::from("");
+                    for column in &select_query.columns {
                         for (i, col) in col_names.iter().enumerate() {
                             if column.to_lowercase() == col.to_lowercase() {
                                 kept_cols.push(i);
+                            }
+                            if let Some(where_clause) = &select_query.where_clause {
+                                if column.to_lowercase() == where_clause.0.to_lowercase() {
+                                    where_val = where_clause.1.clone();
+                                    where_col = Some(i);
+                                }
                             }
                         }
                     }
 
                     for record in records {
                         let mut cur_recs = Vec::new();
+                        if let Some(where_col) = where_col {
+                            if where_val != record.column_contents[where_col].repr() {
+                                continue;
+                            }
+                        }
+
                         for kept_col in &kept_cols {
                             cur_recs.push(record.column_contents[*kept_col].repr());
                         }
