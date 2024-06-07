@@ -1,6 +1,5 @@
 use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_until, take_while1},
+    bytes::complete::{tag_no_case, take_until, take_while1},
     character::complete::{
         self, alpha1, alphanumeric1, char, line_ending, none_of, not_line_ending, one_of, space0,
         space1,
@@ -29,14 +28,14 @@ fn parse_columns(input: &str) -> IResult<&str, Vec<&str>> {
 }
 
 pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
-    let (input, _) = tag("SELECT")(input)?;
+    let (input, _) = tag_no_case("SELECT")(input)?;
     let (input, columns) = parse_columns(input)?;
     let columns = columns
         .into_iter()
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
     let (input, _) = space0(input)?;
-    let (input, _) = tag("FROM")(input)?;
+    let (input, _) = tag_no_case("FROM")(input)?;
 
     let (input, tablename) = parse_identifier(input)?;
     let tablename = tablename.to_string();

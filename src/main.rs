@@ -143,7 +143,9 @@ fn main() -> Result<()> {
                 file.seek(SeekFrom::Start(page_position))?;
                 let records = get_table_records(&mut file, page_position, db_header.page_size)?;
 
-                if select_query.columns.len() == 1 && select_query.columns[0] == "COUNT(*)" {
+                if select_query.columns.len() == 1
+                    && select_query.columns[0].to_lowercase() == "count(*)"
+                {
                     println!("{}", records.len());
                 }
             }

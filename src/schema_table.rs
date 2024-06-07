@@ -24,7 +24,7 @@ impl SchemaTable {
     }
     pub fn get_table_root_page(&self, name: &str) -> Option<u64> {
         self.records.iter().find_map(|s| {
-            if s.coltype == "table" && s.name == name {
+            if s.coltype == "table" && s.name.to_lowercase() == name.to_lowercase() {
                 Some(s.rootpage)
             } else {
                 None
