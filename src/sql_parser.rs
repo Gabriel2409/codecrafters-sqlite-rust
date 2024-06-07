@@ -40,7 +40,7 @@ pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
 
     let (input, tablename) = parse_identifier(input)?;
     let tablename = tablename.to_string();
-    let (input, _) = tag(";")(input)?;
+    // let (input, _) = tag(";")(input)?;
 
     let select_query = SelectQuery { columns, tablename };
 
