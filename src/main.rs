@@ -160,6 +160,7 @@ fn main() -> Result<()> {
                 file.seek(SeekFrom::Start(page_position))?;
                 let records = get_table_records(&mut file, page_position, db_header.page_size)?;
 
+                dbg!(&select_query);
                 if select_query.columns.len() == 1
                     && select_query.columns[0].to_lowercase() == "count(*)"
                 {
@@ -169,10 +170,15 @@ fn main() -> Result<()> {
 
                     let mut where_col = None;
                     let mut where_val = String::from("");
+                    let mut id_col = None;
                     for column in &select_query.columns {
                         for (i, col) in col_names.iter().enumerate() {
                             if column.to_lowercase() == col.to_lowercase() {
                                 kept_cols.push(i);
+                            }
+                            // TODO: make a better paser, this is wrong
+                            if col == "id" {
+                                id_col = Some(i);
                             }
                             if let Some(where_clause) = &select_query.where_clause {
                                 if col.to_lowercase() == where_clause.0.to_lowercase() {
@@ -186,14 +192,22 @@ fn main() -> Result<()> {
                     for record in records {
                         let mut cur_recs = Vec::new();
                         if let Some(where_col) = where_col {
-                            let column_repr = record.column_contents[where_col].repr();
+                            let mut column_repr = record.column_contents[where_col].repr();
+                            if id_col == Some(where_col) {
+                                column_repr = format!("{}", record.integer_key);
+                            }
+
                             if where_val != column_repr {
                                 continue;
                             }
                         }
 
                         for kept_col in &kept_cols {
-                            cur_recs.push(record.column_contents[*kept_col].repr());
+                            let mut column_repr = record.column_contents[*kept_col].repr();
+                            if id_col == Some(*kept_col) {
+                                column_repr = format!("{}", record.integer_key);
+                            }
+                            cur_recs.push(column_repr);
                         }
                         println!("{}", cur_recs.join("|"));
                     }

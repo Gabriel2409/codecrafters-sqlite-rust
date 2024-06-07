@@ -67,8 +67,6 @@ pub struct BTreeTableInteriorCell {
 pub struct BTreeTableLeafCell {
     #[br(parse_with = parse_varint)]
     pub nb_bytes_key_payload_including_overflow: u64,
-    #[br(parse_with = parse_varint)]
-    pub integer_key: u64,
 
     #[br(args {
         nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
@@ -83,6 +81,8 @@ pub struct BTreeTableLeafCell {
 #[brw(big)]
 #[br(import { nb_bytes_key_payload_including_overflow: usize })]
 pub struct Record {
+    #[br(parse_with = parse_varint)]
+    pub integer_key: u64,
     /// Header consists in a list of ColumnTypes after a varint indicating the size
     #[br(parse_with = parse_varint_with_bytes)]
     pub size_header_varint: (u64, usize),
