@@ -1,8 +1,5 @@
 use nom::{
-    bytes::{
-        complete::{tag, tag_no_case, take_until, take_while1},
-        streaming::tag_no_case,
-    },
+    bytes::complete::{tag, tag_no_case, take_until, take_while1},
     character::complete::{
         self, alpha1, alphanumeric1, anychar, char, line_ending, multispace0, multispace1, none_of,
         not_line_ending, one_of, space0, space1,
