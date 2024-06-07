@@ -1,8 +1,8 @@
 use nom::{
-    bytes::complete::{tag_no_case, take_until, take_while1},
+    bytes::complete::{tag, tag_no_case, take_until, take_while1},
     character::complete::{
-        self, alpha1, alphanumeric1, char, line_ending, none_of, not_line_ending, one_of, space0,
-        space1,
+        self, alpha1, alphanumeric1, anychar, char, line_ending, multispace0, multispace1, none_of,
+        not_line_ending, one_of, space0, space1,
     },
     multi::{separated_list0, separated_list1},
     sequence::delimited,
@@ -15,16 +15,30 @@ pub struct SelectQuery {
     pub tablename: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CreateTableQuery {
+    // names and types
+    pub columns_and_types: Vec<Vec<String>>,
+    pub tablename: String,
+}
+
 fn parse_identifier(input: &str) -> IResult<&str, &str> {
+    delimited(multispace0, alphanumeric1, multispace0)(input)
+}
+
+fn parse_identifier_or_star(input: &str) -> IResult<&str, &str> {
     delimited(
-        space0,
+        multispace0,
         take_while1(|c: char| c == '(' || c == ')' || c == '*' || c.is_alphanumeric()),
-        space0,
+        multispace0,
     )(input)
 }
 
 fn parse_columns(input: &str) -> IResult<&str, Vec<&str>> {
-    separated_list0(delimited(space0, char(','), space0), parse_identifier)(input)
+    separated_list0(
+        delimited(multispace0, char(','), multispace0),
+        parse_identifier_or_star,
+    )(input)
 }
 
 pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
@@ -44,4 +58,37 @@ pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
     let select_query = SelectQuery { columns, tablename };
 
     Ok((input, select_query))
+}
+
+fn parse_column_def(input: &str) -> IResult<&str, Vec<&str>> {
+    separated_list1(multispace1, alphanumeric1)(input)
+}
+
+fn parse_column_defs(input: &str) -> IResult<&str, Vec<Vec<&str>>> {
+    separated_list0(
+        tag(","),
+        delimited(multispace0, parse_column_def, multispace0),
+    )(input)
+}
+
+// "CREATE TABLE apples\n(\n\tid integer primary key autoincrement,\n\tname text,\n\tcolor text\n)"
+
+pub fn parse_create_table_command(input: &str) -> IResult<&str, CreateTableQuery> {
+    let (input, _) = tag_no_case("CREATE TABLE")(input)?;
+    let (input, tablename) = parse_identifier(input)?;
+    let tablename = tablename.to_string();
+    let (input, _) = tag_no_case("(")(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, columns_and_types) = parse_column_defs(input)?;
+
+    let columns_and_types: Vec<Vec<String>> = columns_and_types
+        .into_iter()
+        .map(|inner_vec| inner_vec.into_iter().map(|s| s.to_string()).collect())
+        .collect();
+
+    let create_table_query = CreateTableQuery {
+        columns_and_types,
+        tablename,
+    };
+    Ok((input, create_table_query))
 }

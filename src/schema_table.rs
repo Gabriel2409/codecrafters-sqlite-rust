@@ -22,10 +22,11 @@ impl SchemaTable {
             .map(|s| s.name.to_string())
             .collect()
     }
-    pub fn get_table_root_page(&self, name: &str) -> Option<u64> {
+
+    pub fn get_schema_record_for_table(&self, name: &str) -> Option<SchemaTableRecord> {
         self.records.iter().find_map(|s| {
             if s.coltype == "table" && s.name.to_lowercase() == name.to_lowercase() {
-                Some(s.rootpage)
+                Some(s.clone())
             } else {
                 None
             }
@@ -48,7 +49,7 @@ impl TryFrom<Vec<Record>> for SchemaTable {
         })
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SchemaTableRecord {
     pub coltype: String,
     pub name: String,

@@ -157,6 +157,18 @@ pub enum ColumnContent {
     ),
 }
 
+impl ColumnContent {
+    /// Shows record as a string
+    pub fn repr(&self) -> String {
+        match self {
+            ColumnContent::Null => "".to_string(),
+            ColumnContent::Int(x) => format!("{}", x),
+            ColumnContent::Float(x) => format!("{}", x),
+            ColumnContent::Blob(x) => "Blob".to_string(),
+            ColumnContent::String(x) => x.to_string(),
+        }
+    }
+}
 /// Helper function to parse varint fields
 #[binrw::parser(reader, endian)]
 fn parse_varint() -> BinResult<u64> {

@@ -19,7 +19,7 @@ use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType, Recor
 
 use page::BTreeTableInteriorCell;
 
-use crate::schema_table::SchemaTable;
+use crate::{schema_table::SchemaTable, sql_parser::parse_create_table_command};
 
 #[derive(Parser, Clone)]
 #[command(version, about="Custom sqlite", long_about=None )]
@@ -127,7 +127,7 @@ fn main() -> Result<()> {
     let mut is_sql_command = false;
     if let Some(sql_command) = &cli.sql_command {
         is_sql_command = true;
-        match parse_select_command(sql_command).finish() {
+        match parse_select_command(sql_command) {
             Ok((_, select_query)) => {
                 let mut file = File::open(&cli.filename)?;
 
@@ -135,9 +135,28 @@ fn main() -> Result<()> {
 
                 let records = get_table_records(&mut file, 0, db_header.page_size)?;
                 let schema_table = SchemaTable::try_from(records)?;
-                let root_page = schema_table
-                    .get_table_root_page(&select_query.tablename)
+
+                let table_record = schema_table
+                    .get_schema_record_for_table(&select_query.tablename)
                     .expect("Could not find table");
+
+                let root_page = table_record.rootpage;
+                let col_names = match parse_create_table_command(&table_record.sql) {
+                    Ok((_, create_table_query)) => {
+                        assert_eq!(
+                            &create_table_query.tablename.to_lowercase(),
+                            &select_query.tablename.to_lowercase()
+                        );
+                        create_table_query
+                            .columns_and_types
+                            .into_iter()
+                            .map(|c| c[0].clone())
+                            .collect::<Vec<_>>()
+                    }
+                    Err(_) => {
+                        anyhow::bail!("Error parsing SQL command")
+                    }
+                };
 
                 let page_position = db_header.page_size as u64 * (root_page - 1) as u64;
                 file.seek(SeekFrom::Start(page_position))?;
@@ -147,6 +166,23 @@ fn main() -> Result<()> {
                     && select_query.columns[0].to_lowercase() == "count(*)"
                 {
                     println!("{}", records.len());
+                } else {
+                    let mut kept_cols = Vec::new();
+                    for column in select_query.columns {
+                        for (i, col) in col_names.iter().enumerate() {
+                            if column.to_lowercase() == col.to_lowercase() {
+                                kept_cols.push(i);
+                            }
+                        }
+                    }
+
+                    for record in records {
+                        let mut cur_recs = Vec::new();
+                        for kept_col in &kept_cols {
+                            cur_recs.push(record.column_contents[*kept_col].repr());
+                        }
+                        println!("{}", cur_recs.join("|"));
+                    }
                 }
             }
             Err(x) => {
