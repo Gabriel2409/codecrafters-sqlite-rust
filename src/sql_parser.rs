@@ -79,7 +79,6 @@ pub fn parse_select_command(input: &str) -> IResult<&str, SelectQuery> {
 
     let where_clause = where_clause.map(|(a, b)| (a.to_owned(), b.to_owned()));
     // let (input, _) = tag(";")(input)?;
-    dbg!(&where_clause);
 
     let select_query = SelectQuery {
         columns,
