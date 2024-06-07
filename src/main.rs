@@ -1,10 +1,14 @@
 mod database_header;
 mod page;
 mod schema_table;
+mod sql_parser;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use binrw::BinRead;
 use clap::{Parser, Subcommand};
+use itertools::any;
+use nom::Finish;
+use sql_parser::parse_select_command;
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
@@ -17,7 +21,7 @@ use page::BTreeTableInteriorCell;
 
 use crate::schema_table::SchemaTable;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(version, about="Custom sqlite", long_about=None )]
 struct Cli {
     #[arg(help = "Name of the db. Fails if file does not exist")]
@@ -30,17 +34,12 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     #[command(name = ".dbinfo", about = "Show status information about the database")]
     DbInfo,
     #[command(name = ".tables", about = "Prints the table names")]
     Tables,
-    #[command(name = ".count", about = "Counts the nb of rows")]
-    CountRows {
-        #[arg(help = "name of the table")]
-        name: String,
-    },
 }
 
 /// Helper function to parse all the information of a table
@@ -121,19 +120,41 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
     Ok(records)
 }
 
-pub fn execute_sql_command(sql_command: &str) {
-    dbg!(sql_command);
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match &cli.sql_command {
-        Some(sql_command) => {
-            execute_sql_command(&sql_command);
-            return Ok(());
-        }
-        _ => {}
+    // needs the finish keyword to avoid lifetime erros
+    let mut is_sql_command = false;
+    if let Some(sql_command) = &cli.sql_command {
+        is_sql_command = true;
+        match parse_select_command(sql_command).finish() {
+            Ok((_, select_query)) => {
+                let mut file = File::open(&cli.filename)?;
+
+                let db_header = DatabaseHeader::read(&mut file)?;
+
+                let records = get_table_records(&mut file, 0, db_header.page_size)?;
+                let schema_table = SchemaTable::try_from(records)?;
+                let root_page = schema_table
+                    .get_table_root_page(&select_query.tablename)
+                    .expect("Could not find table");
+
+                let page_position = db_header.page_size as u64 * (root_page - 1) as u64;
+                file.seek(SeekFrom::Start(page_position))?;
+                let records = get_table_records(&mut file, page_position, db_header.page_size)?;
+
+                if select_query.columns.len() == 1 && select_query.columns[0] == "COUNT(*)" {
+                    println!("{}", records.len());
+                }
+            }
+            Err(x) => {
+                anyhow::bail!("Error parsing SQL command")
+            }
+        };
+    }
+
+    if is_sql_command {
+        return Ok(());
     }
 
     match &cli.command.expect("Should have a command at this point") {
@@ -155,26 +176,10 @@ fn main() -> Result<()> {
             let db_header = DatabaseHeader::read(&mut file)?;
 
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
-            dbg!(&records);
             let schema_table = SchemaTable::try_from(records)?;
             let table_names = schema_table.get_table_names();
 
             println!("{}", table_names.join(" "));
-        }
-        Commands::CountRows { name } => {
-            let mut file = File::open(&cli.filename)?;
-
-            let db_header = DatabaseHeader::read(&mut file)?;
-
-            let records = get_table_records(&mut file, 0, db_header.page_size)?;
-            let schema_table = SchemaTable::try_from(records)?;
-            let table_names = schema_table.get_table_names();
-            let root_page = schema_table.get_table_root_page("Invoice").unwrap();
-
-            let page_position = db_header.page_size as u64 * (root_page - 1) as u64;
-            file.seek(SeekFrom::Start(page_position))?;
-            let records = get_table_records(&mut file, page_position, db_header.page_size)?;
-            println!("{}", records.len());
         }
     }
     Ok(())

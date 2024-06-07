@@ -1,6 +1,10 @@
 use nom::{
-    bytes::complete::{tag, take_until},
-    character::complete::{self, alpha1, char, line_ending, space0, space1},
+    branch::alt,
+    bytes::complete::{tag, take_until, take_while1},
+    character::complete::{
+        self, alpha1, alphanumeric1, char, line_ending, none_of, not_line_ending, one_of, space0,
+        space1,
+    },
     multi::{separated_list0, separated_list1},
     sequence::delimited,
     IResult,
@@ -13,7 +17,11 @@ pub struct SelectQuery {
 }
 
 fn parse_identifier(input: &str) -> IResult<&str, &str> {
-    delimited(space0, alpha1, space0)(input)
+    delimited(
+        space0,
+        take_while1(|c: char| c == '(' || c == ')' || c == '*' || c.is_alphanumeric()),
+        space0,
+    )(input)
 }
 
 fn parse_columns(input: &str) -> IResult<&str, Vec<&str>> {

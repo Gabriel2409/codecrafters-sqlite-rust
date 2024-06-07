@@ -198,9 +198,7 @@ fn parse_record_header(size_header_varint: (u64, usize)) -> BinResult<Vec<Column
     let mut total_bytes_read = header_bytes_read as u64;
     while total_bytes_read < size_header {
         let (varint, bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
-        dbg!(varint, bytes_read);
         let record_type = ColumnType::try_from(varint)?;
-        dbg!(&record_type);
         records_type.push(record_type);
         total_bytes_read += bytes_read as u64;
     }
