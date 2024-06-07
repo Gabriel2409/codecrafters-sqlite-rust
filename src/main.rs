@@ -155,6 +155,7 @@ fn main() -> Result<()> {
             let db_header = DatabaseHeader::read(&mut file)?;
 
             let records = get_table_records(&mut file, 0, db_header.page_size)?;
+            dbg!(&records);
             let schema_table = SchemaTable::try_from(records)?;
             let table_names = schema_table.get_table_names();
 

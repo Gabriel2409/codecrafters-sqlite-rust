@@ -62,8 +62,7 @@ pub struct BTreeTableInteriorCell {
 /// NOTE: not fully parsed, still have to figure out how to differentiate
 /// the payload and the 4-byte big-endian integer page number for the
 /// first page of the overflow page list
-/// For now, we will only handle cases without overflow, which means the record
-/// might contain invalid data
+/// For now, we will only handle cases without overflow
 #[binread]
 #[derive(Debug)]
 #[brw(big)]
@@ -78,8 +77,7 @@ pub struct BTreeTableLeafCell {
     })]
     pub record: Record,
     // initial portion of the payload that does not spill to overflow pages
-    // we suppose there is no overflow for now
-    // pub payload: Vec<u8>,
+    // we suppose there is no overflow
     // REST not parsed - we suppose there is no overflow
 }
 
@@ -163,14 +161,14 @@ pub enum ColumnContent {
 #[binrw::parser(reader, endian)]
 fn parse_varint() -> BinResult<u64> {
     let mut result = 0u64;
-    let mut shift = 0;
-    for _ in 0..9 {
+    for shift in 0..9u64 {
         let byte = u8::read_options(reader, endian, ())?;
-        result |= ((byte & 0x7F) as u64) << (7 * shift);
+        result <<= 7 * shift;
+
+        result |= (byte & 0x7F) as u64;
         if (byte & 0x80) == 0 {
             break;
         }
-        shift += 1;
     }
     Ok(result)
 }
@@ -178,16 +176,16 @@ fn parse_varint() -> BinResult<u64> {
 #[binrw::parser(reader, endian)]
 fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
     let mut result = 0u64;
-    let mut shift = 0;
     let mut bytes_read = 0;
-    for _ in 0..9 {
+    for shift in 0..9u64 {
         let byte = u8::read_options(reader, endian, ())?;
         bytes_read += 1;
-        result |= ((byte & 0x7F) as u64) << (7 * shift);
+        result <<= 7 * shift;
+
+        result |= (byte & 0x7F) as u64;
         if (byte & 0x80) == 0 {
             break;
         }
-        shift += 1;
     }
     Ok((result, bytes_read))
 }
@@ -200,8 +198,9 @@ fn parse_record_header(size_header_varint: (u64, usize)) -> BinResult<Vec<Column
     let mut total_bytes_read = header_bytes_read as u64;
     while total_bytes_read < size_header {
         let (varint, bytes_read) = parse_varint_with_bytes(reader, endian, ())?;
-        // dbg!(varint, bytes_read);
+        dbg!(varint, bytes_read);
         let record_type = ColumnType::try_from(varint)?;
+        dbg!(&record_type);
         records_type.push(record_type);
         total_bytes_read += bytes_read as u64;
     }
@@ -216,16 +215,13 @@ fn parse_record_payload(
     nb_bytes_key_payload_including_overflow: usize,
     header_size: u64,
 ) -> BinResult<Vec<ColumnContent>> {
-    let page_size = 4096;
-    let reserved_space = 0;
-
-    /// Could be used for overflow
-    let P = nb_bytes_key_payload_including_overflow;
-    let U = page_size - reserved_space;
-    let X = U - 35;
-
-    let M = ((U - 12) * 32) / 255 - 23;
-    let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
+    // TODO: Could be used for overflow.
+    // let P = nb_bytes_key_payload_including_overflow;
+    // let U = page_size - reserved_space;
+    // let X = U - 35;
+    //
+    // let M = ((U - 12) * 32) / 255 - 23;
+    // let K = if P < M { P } else { M + ((P - M) % (U - 4)) };
 
     let mut nb_bytes_parsed = header_size;
 
@@ -299,17 +295,12 @@ fn parse_record_payload(
             ColumnType::String(x) => {
                 // For some reason, sometimes the string size is completely overestimated
                 // There must be a problem with my varint
-                let mut bufsize = *x as usize;
-                let remain = P - nb_bytes_parsed as usize;
-                if bufsize > remain {
-                    bufsize = remain;
-                }
+                let bufsize = *x as usize;
                 let mut buf = vec![0u8; bufsize];
 
                 reader.read_exact(&mut buf)?;
                 let val = String::from_utf8_lossy(&buf);
                 nb_bytes_parsed += buf.len() as u64;
-                // TODO: handle overflow
 
                 ColumnContent::String(val.to_string())
             }
