@@ -129,16 +129,15 @@ fn get_index_records(
     page_size: u16,
     val: &str,
 ) -> Result<Vec<Record>> {
-    dbg!(val);
     let page_header = PageHeader::read(file)?;
+
+    let page_cell_pointer_array = PageCellPointerArray::read_args(
+        file,
+        binrw::args! {nb_cells: page_header.number_of_cells.into()},
+    )?;
 
     let records = match page_header.page_type {
         PageType::InteriorIndex => {
-            let page_cell_pointer_array = PageCellPointerArray::read_args(
-                file,
-                binrw::args! {nb_cells: page_header.number_of_cells.into()},
-            )?;
-
             // TODO: handle case when we have to use right most pointer
             let mut l = 0;
             let mut r = page_cell_pointer_array.offsets.len() - 1;
@@ -159,7 +158,7 @@ fn get_index_records(
                 };
 
                 if mid_val > val {
-                    r = mid - 1;
+                    r = mid;
                 } else if mid_val < val {
                     l = mid + 1;
                 } else {
@@ -189,14 +188,21 @@ fn get_index_records(
                 }
             }
 
+            // handle right most pointer
+            // NOTE: There is probably a more elegant way
+            let page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
+            file.seek(SeekFrom::Start(page_position))?;
+
+            let child_records = get_index_records(file, page_position, page_size, &val)?;
+            for child_record in child_records {
+                if child_record.column_contents[0] == ColumnContent::String(val.clone()) {
+                    records.push(child_record);
+                }
+            }
+
             records
         }
         PageType::LeafIndex => {
-            let page_cell_pointer_array = PageCellPointerArray::read_args(
-                file,
-                binrw::args! {nb_cells: page_header.number_of_cells.into()},
-            )?;
-
             let mut records = Vec::new();
             for offset in page_cell_pointer_array.offsets {
                 let cell_position = initial_pos + offset as u64;
