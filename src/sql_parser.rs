@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case, take_until, take_while1},
-    character::complete::{alphanumeric1, char, multispace0, multispace1, space0},
+    character::complete::{char, multispace0, multispace1, space0},
     multi::{separated_list0, separated_list1},
     sequence::{delimited, preceded, separated_pair},
     IResult,
@@ -19,6 +19,13 @@ pub struct SelectQuery {
 pub struct CreateTableQuery {
     // names and types
     pub columns_and_types: Vec<Vec<String>>,
+    pub tablename: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateIndexQuery {
+    pub indexname: String,
+    pub colname: String,
     pub tablename: String,
 }
 
@@ -135,4 +142,27 @@ pub fn parse_create_table_command(input: &str) -> IResult<&str, CreateTableQuery
         tablename,
     };
     Ok((input, create_table_query))
+}
+
+// CREATE INDEX idx_companies_country on companies (country)
+pub fn parse_create_index_command(input: &str) -> IResult<&str, CreateIndexQuery> {
+    let (input, _) = tag_no_case("CREATE INDEX")(input)?;
+    let (input, indexname) = parse_identifier(input)?;
+    let indexname = indexname.to_string();
+    let (input, _) = multispace0(input)?;
+    let (input, _) = tag_no_case("on")(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, tablename) = parse_identifier(input)?;
+    let tablename = tablename.to_string();
+    let (input, _) = tag_no_case("(")(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, colname) = parse_identifier(input)?;
+    let colname = colname.to_string();
+
+    let create_index_query = CreateIndexQuery {
+        indexname,
+        tablename,
+        colname,
+    };
+    Ok((input, create_index_query))
 }

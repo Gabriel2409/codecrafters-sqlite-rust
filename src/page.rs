@@ -70,6 +70,42 @@ pub struct BTreeTableLeafCell {
 
     #[br(args {
         nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
+        with_integer_key: true
+    })]
+    pub record: Record,
+    // initial portion of the payload that does not spill to overflow pages
+    // we suppose there is no overflow
+    // REST not parsed - we suppose there is no overflow
+}
+
+#[derive(Debug)]
+#[binread]
+#[brw(big)]
+pub struct BTreeIndexInteriorCell {
+    pub left_child_pointer: u32,
+    #[br(parse_with = parse_varint)]
+    pub nb_bytes_key_payload_including_overflow: u64,
+
+    #[br(args {
+        nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
+        with_integer_key: false
+    })]
+    pub record: Record,
+    // initial portion of the payload that does not spill to overflow pages
+    // we suppose there is no overflow
+    // REST not parsed - we suppose there is no overflow
+}
+
+#[binread]
+#[derive(Debug)]
+#[brw(big)]
+pub struct BTreeIndexLeafCell {
+    #[br(parse_with = parse_varint)]
+    pub nb_bytes_key_payload_including_overflow: u64,
+
+    #[br(args {
+        nb_bytes_key_payload_including_overflow: nb_bytes_key_payload_including_overflow as usize,
+        with_integer_key: false
     })]
     pub record: Record,
     // initial portion of the payload that does not spill to overflow pages
@@ -79,8 +115,9 @@ pub struct BTreeTableLeafCell {
 
 #[derive(Debug, BinRead)]
 #[brw(big)]
-#[br(import { nb_bytes_key_payload_including_overflow: usize })]
+#[br(import { nb_bytes_key_payload_including_overflow: usize, with_integer_key: bool })]
 pub struct Record {
+    #[br(if(with_integer_key))]
     #[br(parse_with = parse_varint)]
     pub integer_key: u64,
     /// Header consists in a list of ColumnTypes after a varint indicating the size
@@ -141,7 +178,7 @@ impl TryFrom<u64> for ColumnType {
     }
 }
 
-#[derive(Debug, Clone, BinRead)]
+#[derive(Debug, Clone, PartialEq, BinRead)]
 #[br(big)]
 #[br(import { nb_bytes: usize })]
 pub enum ColumnContent {
@@ -254,7 +291,7 @@ fn parse_record_payload(
             ColumnType::Int24 => {
                 let mut buf = [0u8; 3];
                 reader.read_exact(&mut buf)?;
-                let val: u32 = (buf[0] as u32) << 16 + (buf[1] as u32) << 8 + buf[2] as u32;
+                let val: u32 = ((buf[0] as u32) << 16) + ((buf[1] as u32) << 8) + (buf[2] as u32);
                 nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val as u64)
             }
@@ -268,12 +305,12 @@ fn parse_record_payload(
             ColumnType::Int48 => {
                 let mut buf = [0u8; 6];
                 reader.read_exact(&mut buf)?;
-                let val: u64 = (buf[0] as u64)
-                    << 40 + (buf[1] as u64)
-                    << 32 + (buf[2] as u64)
-                    << 24 + (buf[3] as u64)
-                    << 16 + (buf[4] as u64)
-                    << 8 + (buf[5] as u64);
+                let val: u64 = ((buf[0] as u64) << 40)
+                    + ((buf[1] as u64) << 32)
+                    + ((buf[2] as u64) << 24)
+                    + ((buf[3] as u64) << 16)
+                    + ((buf[4] as u64) << 8)
+                    + (buf[5] as u64);
                 nb_bytes_parsed += buf.len() as u64;
                 ColumnContent::Int(val)
             }

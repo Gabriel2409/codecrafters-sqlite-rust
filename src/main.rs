@@ -13,11 +13,16 @@ use std::{
 };
 
 use database_header::DatabaseHeader;
-use page::{BTreeTableLeafCell, PageCellPointerArray, PageHeader, PageType, Record};
+use page::{
+    BTreeIndexInteriorCell, BTreeIndexLeafCell, BTreeTableLeafCell, PageCellPointerArray,
+    PageHeader, PageType, Record,
+};
 
 use page::BTreeTableInteriorCell;
 
-use crate::{schema_table::SchemaTable, sql_parser::parse_create_table_command};
+use crate::{
+    page::ColumnContent, schema_table::SchemaTable, sql_parser::parse_create_table_command,
+};
 
 #[derive(Parser, Clone)]
 #[command(version, about="Custom sqlite", long_about=None )]
@@ -118,6 +123,95 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
     Ok(records)
 }
 
+fn get_index_records(
+    file: &mut File,
+    initial_pos: u64,
+    page_size: u16,
+    val: &str,
+) -> Result<Vec<Record>> {
+    dbg!(val);
+    let page_header = PageHeader::read(file)?;
+
+    let records = match page_header.page_type {
+        PageType::InteriorIndex => {
+            let page_cell_pointer_array = PageCellPointerArray::read_args(
+                file,
+                binrw::args! {nb_cells: page_header.number_of_cells.into()},
+            )?;
+
+            // TODO: handle case when we have to use right most pointer
+            let mut l = 0;
+            let mut r = page_cell_pointer_array.offsets.len() - 1;
+            dbg!(l, r);
+
+            let mut records = Vec::new();
+
+            let val = val.to_string();
+            while l < r {
+                let mid = l + (r - l) / 2;
+
+                let mid_val = {
+                    file.seek(SeekFrom::Start(
+                        initial_pos + page_cell_pointer_array.offsets[mid] as u64,
+                    ))?;
+                    let b_tree_index_interior_cell = BTreeIndexInteriorCell::read(file)?;
+                    b_tree_index_interior_cell.record.column_contents[0].repr()
+                };
+
+                if mid_val > val {
+                    r = mid - 1;
+                } else if mid_val < val {
+                    l = mid + 1;
+                } else {
+                    break;
+                }
+            }
+            for pos in l..=r {
+                file.seek(SeekFrom::Start(
+                    initial_pos + page_cell_pointer_array.offsets[pos] as u64,
+                ))?;
+                let b_tree_index_interior_cell = BTreeIndexInteriorCell::read(file)?;
+                let mid_val = b_tree_index_interior_cell.record.column_contents[0].repr();
+
+                let page_position =
+                    page_size as u64 * (b_tree_index_interior_cell.left_child_pointer - 1) as u64;
+
+                file.seek(SeekFrom::Start(page_position))?;
+                // traverse the b tree.
+                let child_records = get_index_records(file, page_position, page_size, &val)?;
+                for child_record in child_records {
+                    if child_record.column_contents[0] == ColumnContent::String(val.clone()) {
+                        records.push(child_record);
+                    }
+                }
+            }
+
+            records
+        }
+        PageType::LeafIndex => {
+            let page_cell_pointer_array = PageCellPointerArray::read_args(
+                file,
+                binrw::args! {nb_cells: page_header.number_of_cells.into()},
+            )?;
+
+            let mut records = Vec::new();
+            for offset in page_cell_pointer_array.offsets {
+                let cell_position = initial_pos + offset as u64;
+                file.seek(SeekFrom::Start(cell_position))?;
+                let b_tree_index_leaf_cell = BTreeIndexLeafCell::read(file)?;
+
+                records.push(b_tree_index_leaf_cell.record);
+            }
+            records
+        }
+        _ => anyhow::bail!(
+            "When traversing the b tree, only interior and leaf TABLE pages should be encountered"
+        ),
+    };
+
+    Ok(records)
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -138,7 +232,6 @@ fn main() -> Result<()> {
                     .get_schema_record_for_table(&select_query.tablename)
                     .expect("Could not find table");
 
-                let root_page = table_record.rootpage;
                 let col_names = match parse_create_table_command(&table_record.sql) {
                     Ok((_, create_table_query)) => {
                         assert_eq!(
@@ -156,11 +249,46 @@ fn main() -> Result<()> {
                     }
                 };
 
-                let page_position = db_header.page_size as u64 * (root_page - 1) as u64;
+                // only look at index if there is a where clause
+                let index_record_and_create_index_query = match select_query.where_clause.clone() {
+                    None => None,
+                    Some(where_clause) => schema_table
+                        .get_schema_index_for_table(&select_query.tablename, &where_clause.0),
+                };
+
+                match index_record_and_create_index_query {
+                    None => {}
+                    Some(x) => {
+                        let (index_record, create_index_query) = x;
+                        let page_position =
+                            db_header.page_size as u64 * (index_record.rootpage - 1) as u64;
+                        file.seek(SeekFrom::Start(page_position))?;
+                        let records = get_index_records(
+                            &mut file,
+                            page_position,
+                            db_header.page_size,
+                            &select_query.where_clause.unwrap().1,
+                        )?;
+                        dbg!(records);
+                        // we get the index for first and last integer key
+                        // assert!(records.len() == 2);
+                        // let first_key = match records[0].column_contents[1] {
+                        //     ColumnContent::Int(x) => x,
+                        //     _ => panic!("Could not extract key from index"),
+                        // };
+                        // let last_key = match records[1].column_contents[1] {
+                        //     ColumnContent::Int(x) => x,
+                        //     _ => panic!("Could not extract key from index"),
+                        // };
+                        // dbg!(first_key, last_key);
+                    }
+                }
+                panic!("AA");
+
+                let page_position = db_header.page_size as u64 * (table_record.rootpage - 1) as u64;
                 file.seek(SeekFrom::Start(page_position))?;
                 let records = get_table_records(&mut file, page_position, db_header.page_size)?;
 
-                dbg!(&select_query);
                 if select_query.columns.len() == 1
                     && select_query.columns[0].to_lowercase() == "count(*)"
                 {

@@ -1,4 +1,7 @@
-use crate::page::{ColumnContent, Record};
+use crate::{
+    page::{ColumnContent, Record},
+    sql_parser::{parse_create_index_command, CreateIndexQuery},
+};
 
 /// https://sqlite.org/schematab.html
 
@@ -25,6 +28,31 @@ impl SchemaTable {
         self.records.iter().find_map(|s| {
             if s.coltype == "table" && s.name.to_lowercase() == name.to_lowercase() {
                 Some(s.clone())
+            } else {
+                None
+            }
+        })
+    }
+    pub fn get_schema_index_for_table(
+        &self,
+        tablename: &str,
+        colname: &str,
+    ) -> Option<(SchemaTableRecord, CreateIndexQuery)> {
+        self.records.iter().find_map(|s| {
+            if s.coltype == "index" {
+                let (_, create_index_query) = parse_create_index_command(&s.sql).ok().unzip();
+                match create_index_query {
+                    None => None,
+                    Some(create_index_query) => {
+                        if create_index_query.tablename == tablename
+                            && create_index_query.colname == colname
+                        {
+                            Some((s.clone(), create_index_query))
+                        } else {
+                            None
+                        }
+                    }
+                }
             } else {
                 None
             }
