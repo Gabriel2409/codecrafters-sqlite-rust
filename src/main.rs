@@ -6,6 +6,7 @@ mod sql_parser;
 use anyhow::Result;
 use binrw::BinRead;
 use clap::{Parser, Subcommand};
+use itertools::Itertools;
 use sql_parser::parse_select_command;
 use std::{
     fs::File,
@@ -278,10 +279,20 @@ fn main() -> Result<()> {
                             db_header.page_size,
                             &select_query.where_clause.unwrap().1,
                         )?;
-                        dbg!(records.len());
+
+                        dbg!(&records);
+                        let integer_keys = records
+                            .iter()
+                            .filter_map(|r| match r.column_contents[1] {
+                                ColumnContent::Int(x) => Some(x),
+                                _ => None,
+                            })
+                            .sorted()
+                            .collect::<Vec<_>>();
+                        dbg!(integer_keys);
+                        return Ok(());
                     }
                 }
-                panic!("AA");
 
                 let page_position = db_header.page_size as u64 * (table_record.rootpage - 1) as u64;
                 file.seek(SeekFrom::Start(page_position))?;
