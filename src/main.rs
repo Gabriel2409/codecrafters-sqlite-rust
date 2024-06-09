@@ -171,7 +171,10 @@ fn get_index_records(
                     initial_pos + page_cell_pointer_array.offsets[pos] as u64,
                 ))?;
                 let b_tree_index_interior_cell = BTreeIndexInteriorCell::read(file)?;
-                let mid_val = b_tree_index_interior_cell.record.column_contents[0].repr();
+                let pos_val = b_tree_index_interior_cell.record.column_contents[0].repr();
+                if pos_val == val {
+                    records.push(b_tree_index_interior_cell.record);
+                }
 
                 let page_position =
                     page_size as u64 * (b_tree_index_interior_cell.left_child_pointer - 1) as u64;
@@ -269,18 +272,7 @@ fn main() -> Result<()> {
                             db_header.page_size,
                             &select_query.where_clause.unwrap().1,
                         )?;
-                        dbg!(records);
-                        // we get the index for first and last integer key
-                        // assert!(records.len() == 2);
-                        // let first_key = match records[0].column_contents[1] {
-                        //     ColumnContent::Int(x) => x,
-                        //     _ => panic!("Could not extract key from index"),
-                        // };
-                        // let last_key = match records[1].column_contents[1] {
-                        //     ColumnContent::Int(x) => x,
-                        //     _ => panic!("Could not extract key from index"),
-                        // };
-                        // dbg!(first_key, last_key);
+                        dbg!(records.len());
                     }
                 }
                 panic!("AA");
