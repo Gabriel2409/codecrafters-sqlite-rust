@@ -61,14 +61,13 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
     // corresponds to file.stream_position()
 
     let page_header = PageHeader::read(file)?;
+    let page_cell_pointer_array = PageCellPointerArray::read_args(
+        file,
+        binrw::args! {nb_cells: page_header.number_of_cells.into()},
+    )?;
 
     let records = match page_header.page_type {
         PageType::InteriorTable => {
-            let page_cell_pointer_array = PageCellPointerArray::read_args(
-                file,
-                binrw::args! {nb_cells: page_header.number_of_cells.into()},
-            )?;
-
             let mut records = Vec::new();
 
             // Here we read the pages corresponding to the pointer array.
@@ -101,11 +100,6 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
             // cell then check the payload for the CREATE TABLE string.
             // This seems to work...
 
-            let page_cell_pointer_array = PageCellPointerArray::read_args(
-                file,
-                binrw::args! {nb_cells: page_header.number_of_cells.into()},
-            )?;
-
             let mut records = Vec::new();
             for offset in page_cell_pointer_array.offsets {
                 let cell_position = initial_pos + offset as u64;
@@ -122,6 +116,63 @@ fn get_table_records(file: &mut File, initial_pos: u64, page_size: u16) -> Resul
     };
 
     Ok(records)
+}
+
+fn get_table_integer_key_record(
+    file: &mut File,
+    initial_pos: u64,
+    page_size: u16,
+    integer_key: u64,
+) -> Result<Record> {
+    let page_header = PageHeader::read(file)?;
+    let page_cell_pointer_array = PageCellPointerArray::read_args(
+        file,
+        binrw::args! {nb_cells: page_header.number_of_cells.into()},
+    )?;
+    match page_header.page_type {
+        PageType::InteriorTable => {
+            let page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
+            file.seek(SeekFrom::Start(page_position))?;
+            let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
+            if b_tree_table_interior_cell.integer_key <= integer_key {
+                dbg!("A");
+                return get_table_integer_key_record(file, page_position, page_size, integer_key);
+            }
+
+            for offset in page_cell_pointer_array.offsets.iter().rev() {
+                dbg!("B");
+                // offset is relative to start of the page
+                file.seek(SeekFrom::Start(initial_pos + *offset as u64))?;
+                let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
+                if b_tree_table_interior_cell.integer_key <= integer_key {
+                    let page_position = page_size as u64
+                        * (b_tree_table_interior_cell.left_child_pointer - 1) as u64;
+                    return get_table_integer_key_record(
+                        file,
+                        page_position,
+                        page_size,
+                        integer_key,
+                    );
+                }
+            }
+            anyhow::bail!("Could not find record");
+        }
+        PageType::LeafTable => {
+            for offset in page_cell_pointer_array.offsets {
+                let cell_position = initial_pos + offset as u64;
+                file.seek(SeekFrom::Start(cell_position))?;
+                let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
+                let record = b_tree_table_leaf_cell.record;
+                if record.integer_key == integer_key {
+                    return Ok(record);
+                }
+            }
+            anyhow::bail!("Could not find record");
+        }
+        _ => anyhow::bail!(
+            "When traversing the b tree, only interior and leaf TABLE pages should be encountered"
+        ),
+    };
 }
 
 fn get_index_records(
@@ -142,7 +193,6 @@ fn get_index_records(
             // TODO: handle case when we have to use right most pointer
             let mut l = 0;
             let mut r = page_cell_pointer_array.offsets.len() - 1;
-            dbg!(l, r);
 
             let mut records = Vec::new();
 
@@ -280,7 +330,6 @@ fn main() -> Result<()> {
                             &select_query.where_clause.unwrap().1,
                         )?;
 
-                        dbg!(&records);
                         let integer_keys = records
                             .iter()
                             .filter_map(|r| match r.column_contents[1] {
@@ -289,7 +338,21 @@ fn main() -> Result<()> {
                             })
                             .sorted()
                             .collect::<Vec<_>>();
-                        dbg!(integer_keys);
+
+                        let mut records = Vec::new();
+                        for integer_key in integer_keys {
+                            let page_position =
+                                db_header.page_size as u64 * (table_record.rootpage - 1) as u64;
+                            file.seek(SeekFrom::Start(page_position))?;
+                            records.push(get_table_integer_key_record(
+                                &mut file,
+                                page_position,
+                                db_header.page_size,
+                                integer_key,
+                            ))
+                        }
+                        dbg!(records);
+
                         return Ok(());
                     }
                 }
@@ -297,7 +360,6 @@ fn main() -> Result<()> {
                 let page_position = db_header.page_size as u64 * (table_record.rootpage - 1) as u64;
                 file.seek(SeekFrom::Start(page_position))?;
                 let records = get_table_records(&mut file, page_position, db_header.page_size)?;
-
                 if select_query.columns.len() == 1
                     && select_query.columns[0].to_lowercase() == "count(*)"
                 {
