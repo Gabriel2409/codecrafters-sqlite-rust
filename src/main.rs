@@ -343,7 +343,7 @@ fn main() -> Result<()> {
                                 integer_key,
                             ))
                         }
-                        // dbg!(records);
+                        dbg!(records);
 
                         return Ok(());
                     }

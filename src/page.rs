@@ -210,7 +210,7 @@ fn parse_varint() -> BinResult<u64> {
     let mut result = 0u64;
     for shift in 0..9u64 {
         let byte = u8::read_options(reader, endian, ())?;
-        result <<= 7 * shift;
+        result <<= 7;
 
         result |= (byte & 0x7F) as u64;
         if (byte & 0x80) == 0 {
@@ -227,7 +227,7 @@ fn parse_varint_with_bytes() -> BinResult<(u64, usize)> {
     for shift in 0..9u64 {
         let byte = u8::read_options(reader, endian, ())?;
         bytes_read += 1;
-        result <<= 7 * shift;
+        result <<= 7;
 
         result |= (byte & 0x7F) as u64;
         if (byte & 0x80) == 0 {
