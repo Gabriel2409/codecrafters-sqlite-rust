@@ -341,9 +341,35 @@ fn main() -> Result<()> {
                                 page_position,
                                 db_header.page_size,
                                 integer_key,
-                            ))
+                            )?);
                         }
-                        dbg!(records);
+                        let mut kept_cols = Vec::new();
+
+                        let mut id_col = None;
+                        for column in &select_query.columns {
+                            for (i, col) in col_names.iter().enumerate() {
+                                if column.to_lowercase() == col.to_lowercase() {
+                                    kept_cols.push(i);
+                                }
+                                // TODO: make a better paser, this is wrong
+                                if col == "id" {
+                                    id_col = Some(i);
+                                }
+                            }
+                        }
+
+                        for record in records {
+                            let mut cur_recs = Vec::new();
+
+                            for kept_col in &kept_cols {
+                                let mut column_repr = record.column_contents[*kept_col].repr();
+                                if id_col == Some(*kept_col) {
+                                    column_repr = format!("{}", record.integer_key);
+                                }
+                                cur_recs.push(column_repr);
+                            }
+                            println!("{}", cur_recs.join("|"));
+                        }
 
                         return Ok(());
                     }
