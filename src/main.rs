@@ -131,31 +131,22 @@ fn get_table_integer_key_record(
     )?;
     match page_header.page_type {
         PageType::InteriorTable => {
-            let page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
-            file.seek(SeekFrom::Start(page_position))?;
-            let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
-            if b_tree_table_interior_cell.integer_key <= integer_key {
-                dbg!("A");
-                return get_table_integer_key_record(file, page_position, page_size, integer_key);
-            }
+            let mut page_position = page_size as u64 * (page_header.right_most_pointer - 1) as u64;
 
             for offset in page_cell_pointer_array.offsets.iter().rev() {
-                dbg!("B");
                 // offset is relative to start of the page
                 file.seek(SeekFrom::Start(initial_pos + *offset as u64))?;
                 let b_tree_table_interior_cell = BTreeTableInteriorCell::read(file)?;
-                if b_tree_table_interior_cell.integer_key <= integer_key {
-                    let page_position = page_size as u64
-                        * (b_tree_table_interior_cell.left_child_pointer - 1) as u64;
-                    return get_table_integer_key_record(
-                        file,
-                        page_position,
-                        page_size,
-                        integer_key,
-                    );
+                if integer_key > b_tree_table_interior_cell.integer_key {
+                    break;
                 }
+
+                page_position =
+                    page_size as u64 * (b_tree_table_interior_cell.left_child_pointer - 1) as u64;
             }
-            anyhow::bail!("Could not find record");
+
+            file.seek(SeekFrom::Start(page_position))?;
+            get_table_integer_key_record(file, page_position, page_size, integer_key)
         }
         PageType::LeafTable => {
             for offset in page_cell_pointer_array.offsets {
@@ -163,16 +154,17 @@ fn get_table_integer_key_record(
                 file.seek(SeekFrom::Start(cell_position))?;
                 let b_tree_table_leaf_cell = BTreeTableLeafCell::read(file)?;
                 let record = b_tree_table_leaf_cell.record;
+
                 if record.integer_key == integer_key {
                     return Ok(record);
                 }
             }
-            anyhow::bail!("Could not find record");
+            anyhow::bail!("Could not find record")
         }
         _ => anyhow::bail!(
             "When traversing the b tree, only interior and leaf TABLE pages should be encountered"
         ),
-    };
+    }
 }
 
 fn get_index_records(
@@ -351,7 +343,7 @@ fn main() -> Result<()> {
                                 integer_key,
                             ))
                         }
-                        dbg!(records);
+                        // dbg!(records);
 
                         return Ok(());
                     }
